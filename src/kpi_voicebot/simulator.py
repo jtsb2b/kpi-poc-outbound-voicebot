@@ -240,7 +240,7 @@ def main() -> None:
     chat.add_argument("--llm", action="store_true", help="interpret replies with the self-hosted LLM")
     chat.add_argument("--voice", action="store_true", help="speak bot turns aloud (JAI TTS)")
     chat.add_argument(
-        "--mic", action="store_true", help="answer by speaking into the microphone (JaiASR); implies --voice"
+        "--mic", action="store_true", help="answer by speaking into the microphone (ASR_PROVIDER); implies --voice"
     )
     chat.add_argument(
         "--headphones", action="store_true", help="with --mic: let the customer cut in while the bot talks"

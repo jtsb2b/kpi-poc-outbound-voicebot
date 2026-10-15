@@ -1,12 +1,12 @@
-"""One spoken conversation: audio in → front end → JaiASR → dialogue → JAI TTS → audio out.
+"""One spoken conversation: audio in → front end → Soniox (or JaiASR) → dialogue → JAI TTS → audio out.
 
 The same loop runs a desk test through the microphone (`mic.py`) and a real phone call through
 LiveKit (`telephony.py`); only where the audio comes from and goes to differs.
 
 - Incoming audio (16 kHz mono, any chunk size) is pushed with `feed`. It goes through the front
   end (`audio.py`: echo cancellation, noise suppression, gain control, Silero VAD) and the
-  cleaned audio streams to JaiASR.
-- The customer's turn ends at JaiASR's commit (0.5 s of silence); open-ended answers get a short
+  cleaned audio streams to the recogniser.
+- The customer's turn ends at the recogniser's end of utterance; open-ended answers get a short
   grace period so a pause mid-thought does not cut them off (`TurnCollector`).
 - Barge-in (full duplex only): while the bot speaks, a sustained phrase (VAD speech over 0.7 s, or
   recognised words that are more than "ครับ / อืม"; on computer speakers recognised words only,
@@ -60,7 +60,7 @@ def without_hello(text: str) -> str:
 
 
 def asr_context(engine: BaseEngine) -> str:
-    """Names and values this call may hear, so JaiASR spells them right."""
+    """Names and values this call may hear, so the recogniser spells them right."""
     keys = ("customer_name", "plan_name", "beneficiary", "delivery_target", "payment_channel", "case_id")
     words = [engine.vars[k] for k in keys if engine.vars.get(k)]
     return ", ".join(["น้องเคพีไอ", "กรุงไทยพานิชประกันภัย", *words])
@@ -165,7 +165,7 @@ class VoiceSession:
             while len(self.outgoing) >= FRAME_BYTES:
                 frame = bytes(self.outgoing[:FRAME_BYTES])
                 del self.outgoing[:FRAME_BYTES]
-                # Muted frames still go out as silence: JaiASR drops streams that go quiet for 5 min.
+                # Muted frames still go out as silence: recognisers drop streams that go quiet too long.
                 await self.asr.send(silence if self._muted() else frame)
 
     async def _watch_barge_in(self) -> None:

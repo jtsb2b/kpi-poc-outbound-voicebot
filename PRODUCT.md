@@ -25,7 +25,7 @@ The operator UI is a small control surface: choose campaign → enter phone and 
 
 ## Positioning
 
-The bot runs on JTS's own stack: internal ASR, a self-hosted LLM (OpenThai 2.0, 27B, Qwen 3.8 base), and TTS (interim Gemini Live voice until the internal TTS is ready), over LiveKit SIP. Application code controls every business decision: identity gate, required fields, score validation, callbacks, discrepancies, escalation and outcomes. The LLM interprets replies and words each turn naturally, inside a guard that keeps every fact, number and disclosure exact. Interrupted speech is tracked so it is never recorded as delivered.
+The bot runs on Soniox speech recognition (while JTS's JaiASR is in maintenance), a self-hosted LLM on the JTS gateway (OpenThai 2.0, 27B, Qwen 3.8 base) and JTS's own JAI TTS voice, over LiveKit SIP. The LLM leads the conversation from an approved knowledge base against a checklist of what the call must cover. Application code keeps the identity gate, the AI disclosure, recording notice and free-look wording, exact facts and numbers, score validation, callbacks, discrepancies, escalation and outcomes. Interrupted speech is tracked so it is never recorded as delivered.
 
 ## Operating Context
 
@@ -37,7 +37,7 @@ The bot runs on JTS's own stack: internal ASR, a self-hosted LLM (OpenThai 2.0, 
 
 ## Capabilities and Constraints
 
-- **Current state, step 1:** text simulation end to end, covering campaign engines, MongoDB store, FastAPI, Excel and the React operator UI. Model adapters, the LiveKit agent and SIP calling come next.
+- **Current state:** live calls over LiveKit SIP work end to end (dialling, conversation, results, transcript, recording to Tencent COS), with text and microphone simulators beside them. Remaining before go-live: KPI approval of wording and the knowledge base, a Bangkok-side LiveKit route for call audio quality, and deployment by DevOps.
 - **Persona:** the bot is **น้องเคพีไอ**, a female voice (ดิฉัน/ค่ะ/คะ), introduced as "AI ผู้ช่วย". It never claims to be a human employee.
 - **Recording:** call audio is recorded to COS cloud storage (PM approval, 8 Oct 2026), alongside transcripts, structured results and events (configurable retention, default 30 days). The opening gives the recording notice. If the customer objects, the bot ends the call politely and the transcript and recording are discarded.
 - **Phone numbers:**

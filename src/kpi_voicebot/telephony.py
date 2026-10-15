@@ -2,7 +2,7 @@
 
 Order of a call:
 1. Create a room `{LIVEKIT_ROOM_PREFIX}{call id}` and join it as the bot; publish the bot's voice
-   track and open JaiASR and JAI TTS, all before dialling, so nothing waits once they answer.
+   track and open the recogniser (Soniox) and JAI TTS, all before dialling, so nothing waits once they answer.
 2. Dial once through the project's outbound trunk (`CreateSIPParticipant`, From = the caller
    extension, Krisp noise cancellation at the SIP edge). The SIP participant's `sip.callStatus`
    attribute reports ringing; a cancel request during ringing deletes the room, which hangs up.
