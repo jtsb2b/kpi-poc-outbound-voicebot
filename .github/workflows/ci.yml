@@ -1,0 +1,59 @@
+name: CI
+
+# Checks only. No secrets are provided, so nothing can reach LiveKit, the PBX, the LLM or the voices:
+# CI never places a phone call. The live tests skip themselves without their keys.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.12.1"
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check src tests
+      - run: uv run ruff format --check src tests
+      - run: uv run mypy src
+      - run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: apps/web/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  images:
+    runs-on: ubuntu-24.04
+    needs: [backend, web]
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t kpi-voicebot:ci .
+      - run: docker build -t kpi-voicebot-web:ci apps/web

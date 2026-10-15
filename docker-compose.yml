@@ -1,0 +1,77 @@
+# KPI outbound voicebot: MongoDB, API, call worker and operator web UI.
+# Secrets come from the env file at run time; no .env file is copied into any image.
+services:
+  kpi-voicebot-mongo:
+    image: mongo:7
+    container_name: kpi-voicebot-mongo
+    volumes:
+      - kpi-voicebot-mongo:/data/db
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  kpi-voicebot-api:
+    image: kpi-voicebot-api-img
+    container_name: kpi-voicebot-api
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["kpi-api"]
+    env_file:
+      - ${COMPOSE_ENV_FILE:-.env}
+    environment:
+      MONGO_URI: mongodb://kpi-voicebot-mongo:27017
+      API_HOST: 0.0.0.0
+    depends_on:
+      kpi-voicebot-mongo:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready')"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  kpi-voicebot-worker:
+    image: kpi-voicebot-api-img
+    container_name: kpi-voicebot-worker
+    command: ["kpi-worker"]
+    env_file:
+      - ${COMPOSE_ENV_FILE:-.env}
+    environment:
+      MONGO_URI: mongodb://kpi-voicebot-mongo:27017
+    volumes:
+      - kpi-voicebot-tts-cache:/data/tts_cache
+    depends_on:
+      kpi-voicebot-api:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 2m  # a call in progress finishes before the container stops
+
+  kpi-voicebot-web:
+    image: kpi-voicebot-web-img
+    container_name: kpi-voicebot-web
+    build:
+      context: apps/web
+      dockerfile: Dockerfile
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      kpi-voicebot-api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/ready"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+
+volumes:
+  kpi-voicebot-mongo:
+  kpi-voicebot-tts-cache:
