@@ -1,0 +1,74 @@
+# Wording shared by both campaigns. A campaign file may override any key.
+wording:
+  wrong_person_close:
+    status: poc_approved
+    segments: ["ขออภัยที่รบกวนค่ะ ขอบคุณมากค่ะ สวัสดีค่ะ"]
+  ask_callback_time:
+    status: poc_approved
+    segments: ["ได้ค่ะ สะดวกให้ติดต่อกลับช่วงไหนดีคะ"]
+  callback_close:
+    status: poc_approved
+    segments: ["รับทราบค่ะ ดิฉันบันทึกช่วง{callback_time}ไว้แล้วนะคะ ขอบคุณค่ะ สวัสดีค่ะ"]
+  callback_close_no_time:
+    status: poc_approved
+    segments: ["ไม่เป็นไรค่ะ ขอบคุณค่ะ สวัสดีค่ะ"]
+  objection_close:
+    status: poc_approved
+    segments:
+      - "รับทราบค่ะ ขออภัยด้วยนะคะ"
+      - "หากต้องการติดต่อ โทรศูนย์บริการลูกค้าได้ที่ {service_phone} ค่ะ ขอบคุณค่ะ สวัสดีค่ะ"
+  refuse_close:
+    status: poc_approved
+    segments: ["รับทราบค่ะ ขออภัยที่รบกวนนะคะ ขอบคุณค่ะ สวัสดีค่ะ"]
+  dnc_close:
+    status: poc_approved
+    segments: ["รับทราบค่ะ ดิฉันบันทึกไว้แล้วนะคะ ขออภัยที่รบกวนค่ะ สวัสดีค่ะ"]
+  verification_failed_close:
+    status: pending_kpi_approval
+    segments: ["ขออภัยค่ะ ดิฉันยังยืนยันตัวตนไม่ได้ ขออนุญาตให้เจ้าหน้าที่ติดต่อกลับภายหลังนะคะ ขอบคุณค่ะ สวัสดีค่ะ"]
+  hold_ack:
+    status: poc_approved
+    segments: ["ได้ค่ะ ดิฉันรอสายนะคะ"]
+  still_there:
+    status: poc_approved
+    segments: ["ยังอยู่ในสายไหมคะ"]
+  no_response_close:
+    status: poc_approved
+    segments: ["ดิฉันขออนุญาตวางสายก่อนนะคะ ขอบคุณค่ะ สวัสดีค่ะ"]
+  ai_identity:
+    verbatim: true
+    status: poc_approved
+    segments: ["ดิฉันเป็น AI ผู้ช่วยของกรุงไทยพานิชประกันภัยค่ะ"]
+  unknown_answer:
+    status: poc_approved
+    segments: ["เรื่องนี้ดิฉันยังไม่มีข้อมูลที่ยืนยันได้ค่ะ ขอบันทึกไว้ให้เจ้าหน้าที่ติดต่อกลับเพื่อให้ข้อมูลนะคะ"]
+  return_prefix:
+    status: poc_approved
+    segments: ["กลับมาที่คำถามเมื่อสักครู่นะคะ"]
+  resume_prefix:
+    status: poc_approved
+    segments: ["ต่อนะคะ"]
+  off_topic:
+    status: poc_approved
+    segments: ["ขอโทษนะคะ เรื่องนี้ดิฉันช่วยไม่ได้ ดิฉันตอบได้เฉพาะเรื่องกรมธรรม์ค่ะ"]
+  invite_question:
+    status: poc_approved
+    segments: ["ได้เลยค่ะ สอบถามได้เลยนะคะ"]
+  invite_question_again:
+    status: poc_approved
+    segments: ["ได้ค่ะ อยากสอบถามเรื่องไหนคะ"]
+  repeat_prefix:
+    status: poc_approved
+    segments: ["ขอทวนอีกครั้งนะคะ"]
+  hedge_recheck:
+    status: poc_approved
+    segments: ["ค่ะ งั้นดิฉันทวนอีกทีนะคะ"]
+  hedge_unresolved:
+    status: poc_approved
+    segments: ["ไม่เป็นไรค่ะ ส่วนนี้ดิฉันจดไว้ให้เจ้าหน้าที่ตรวจสอบอีกทีนะคะ"]
+  reflect_feedback:
+    status: poc_approved
+    segments: ["เรื่อง{reflection} ดิฉันบันทึกไว้แล้วนะคะ ขอบคุณที่บอกค่ะ"]
+  hold_ack_again:
+    status: poc_approved
+    segments: ["ค่ะ ไม่รีบนะคะ ดิฉันรออยู่ค่ะ"]

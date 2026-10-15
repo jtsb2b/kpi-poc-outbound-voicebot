@@ -1,0 +1,208 @@
+# Campaign A: PA policy confirmation.
+# Wording statuses:
+#   poc_approved          approved by JTS PM/operator on 2026-10-07 for the POC (KPI final approval still required)
+#   kpi_source            KPI-supplied script wording, adapted to a female voice and short turns
+#   pending_kpi_approval  legal/product wording or demo facts that KPI has not confirmed
+id: pa_confirmation
+title: ยืนยันกรมธรรม์ประกันอุบัติเหตุ (PA)
+version: "2026-10-07.1"
+persona_name: น้องเคพีไอ
+service_phone: "02-624-1111"
+identity:
+  second_factor: null          # set to birth_day_month to require day/month of birth
+limits:
+  max_clarifications: 2
+  max_silences: 3
+  max_faq_questions: 3
+
+wording:
+  greet:
+    status: poc_approved
+    segments: ["สวัสดีค่ะ ขอเรียนสายคุณ{customer_name}ค่ะ"]
+  identity_recheck:
+    status: poc_approved
+    segments: ["ขออนุญาตเรียนสาย คุณ{customer_name} ใช่ไหมคะ"]
+  second_factor_ask:
+    status: pending_kpi_approval
+    segments: ["ก่อนเริ่ม ขออนุญาตยืนยันตัวตนนะคะ รบกวนแจ้งวันและเดือนเกิดของคุณลูกค้าค่ะ"]
+  second_factor_retry:
+    status: pending_kpi_approval
+    segments: ["ขออภัยค่ะ ข้อมูลยังไม่ตรง รบกวนแจ้งวันและเดือนเกิดอีกครั้งนะคะ"]
+  intro:
+    verbatim: true
+    status: poc_approved
+    segments:
+      - "ดิฉัน {persona_name} เป็น AI ผู้ช่วย ติดต่อจาก บริษัท กรุงไทยพานิชประกันภัย จำกัด (มหาชน) ค่ะ"
+      - "วันนี้โทรมาเพื่อขอบคุณ และยืนยันความคุ้มครองกรมธรรม์ประกันอุบัติเหตุส่วนบุคคลที่คุณลูกค้าได้ตกลงทำไว้ค่ะ"
+      - "รบกวนเวลาประมาณ 3 ถึง 5 นาที สะดวกไหมคะ"
+  availability_short:
+    status: poc_approved
+    segments: ["ตอนนี้สะดวกคุยประมาณ 3 ถึง 5 นาทีไหมคะ"]
+  notice:
+    verbatim: true
+    status: poc_approved
+    segments:
+      - "ขอแจ้งให้ทราบว่า การสนทนานี้จะถูกบันทึกเสียง เพื่อรักษาผลประโยชน์ของคุณลูกค้า และใช้ปรับปรุงคุณภาพการให้บริการนะคะ"
+  review_intro:
+    status: kpi_source
+    segments: ["ต่อไปขออนุญาตทวนรายละเอียดกรมธรรม์ที่คุณลูกค้าทำไว้นะคะ"]
+  free_look:
+    verbatim: true
+    status: pending_kpi_approval
+    segments:
+      - "ขออนุญาตแจ้งข้อมูลสำคัญเพิ่มเติมนะคะ"
+      - "เมื่อคุณลูกค้าได้รับกรมธรรม์แล้ว หากตรวจสอบแล้วไม่ตรงกับความต้องการ สามารถแจ้งยกเลิกได้ภายใน 30 วัน นับจากวันที่ได้รับกรมธรรม์"
+      - text: "โดยจะได้รับเงินคืนเต็มจำนวนค่ะ"
+        facts: [free_look]
+  questions:
+    status: kpi_source
+    segments: ["ไม่ทราบว่าคุณลูกค้ามีข้อสงสัย หรืออยากสอบถามเพิ่มเติมส่วนไหนไหมคะ"]
+  more_questions:
+    status: poc_approved
+    segments: ["มีเรื่องอื่นที่อยากสอบถามเพิ่มเติมไหมคะ"]
+  closing:
+    status: kpi_source
+    segments:
+      - "หากในอนาคตมีคำถามเรื่องการเคลม ต้องการแก้ไขข้อมูล หรือต้องการความช่วยเหลือ"
+      - "ติดต่อศูนย์บริการลูกค้ากรุงไทยพานิชประกันภัยได้ที่ {service_phone}"
+      - "หรือเว็บไซต์ www.kpi.co.th ค่ะ"
+      - "ขอขอบคุณที่มอบความไว้วางใจให้กรุงไทยพานิชประกันภัยดูแลนะคะ สวัสดีค่ะ"
+  discrepancy_ask:
+    status: poc_approved
+    segments: ["ขอทราบว่าส่วนไหนไม่ตรงคะ"]
+  discrepancy_ack:
+    status: poc_approved
+    segments: ["ขอบคุณค่ะ ดิฉันบันทึกไว้ให้เจ้าหน้าที่ตรวจสอบและติดต่อกลับนะคะ"]
+  hedge_check:
+    status: poc_approved
+    segments: ["ตรงกับที่คุณลูกค้าทราบไหมคะ"]
+  repeat_tag:
+    status: poc_approved
+    segments: ["ตามนี้นะคะ"]
+  confirm_clarify:
+    status: poc_approved
+    segments: ["ข้อมูล{unit_short}ตามที่แจ้งไป ตรงไหมคะ"]
+
+acknowledgements: ["ค่ะ", "ขอบคุณค่ะ", "รับทราบค่ะ", "ได้ค่ะ"]
+
+review_units:
+  # Read like an operator: one fact per turn, said as a statement the customer acknowledges ("ครับ").
+  # An explicit question (confirm) only where the customer must check a detail they know themselves.
+  - id: plan_coverage
+    short: "แผนและวงเงินคุ้มครองหลัก"
+    status: pending_kpi_approval
+    segments:
+      - text: "แผนที่คุณลูกค้าทำไว้ คือแผนประกันอุบัติเหตุ {plan_name}"
+        facts: [plan_name]
+      - text: "ความคุ้มครองหลัก กรณีเสียชีวิตจากอุบัติเหตุ {death_benefit} บาทนะคะ"
+        facts: [death_benefit]
+    repeat:
+      - text: "แผน{plan_name} คุ้มครองกรณีเสียชีวิตจากอุบัติเหตุ {death_benefit} บาท"
+  - id: medical
+    short: "ค่ารักษาพยาบาล"
+    status: pending_kpi_approval
+    segments:
+      - text: "ค่ารักษาพยาบาลต่ออุบัติเหตุแต่ละครั้ง {medical} บาทค่ะ"
+        facts: [medical_per_accident]
+        requires: [medical]
+    repeat:
+      - text: "ค่ารักษาต่ออุบัติเหตุแต่ละครั้ง {medical} บาท"
+        requires: [medical]
+  - id: daily
+    short: "เงินชดเชยรายได้"
+    status: pending_kpi_approval
+    segments:
+      - text: "แล้วก็มีเงินชดเชยรายได้ระหว่างเข้ารักษาตัวในโรงพยาบาล วันละ {daily} บาท สูงสุด {daily_max_days} วันนะคะ"
+        facts: [daily_hospital]
+        requires: [daily, daily_max_days]
+    repeat:
+      - text: "เงินชดเชยวันละ {daily} บาท สูงสุด {daily_max_days} วัน"
+        requires: [daily, daily_max_days]
+  - id: premium
+    short: "เบี้ยประกันภัย"
+    status: pending_kpi_approval
+    segments:
+      - text: "เบี้ยประกันภัย {premium} บาทต่อ{billing_period}ค่ะ"
+        facts: [premium]
+    repeat:
+      - text: "เบี้ย {premium} บาทต่อ{billing_period}"
+  - id: effective_date
+    short: "วันเริ่มคุ้มครอง"
+    status: pending_kpi_approval
+    segments:
+      - text: "กรมธรรม์เริ่มคุ้มครองวันที่ {effective_date} เวลา {effective_time} เป็นต้นไปนะคะ"
+        facts: [effective_date]
+    repeat:
+      - text: "เริ่มคุ้มครองวันที่ {effective_date} เวลา {effective_time}"
+  - id: beneficiary
+    short: "ผู้รับผลประโยชน์"
+    status: kpi_source
+    segments:
+      - text: "ผู้รับผลประโยชน์ที่คุณลูกค้าระบุไว้ คือ {beneficiary}"
+        facts: [beneficiary]
+    confirm: "ใช่ไหมคะ"
+    repeat:
+      - text: "ผู้รับผลประโยชน์ คือ {beneficiary}"
+  - id: payment
+    short: "การชำระเงิน"
+    status: kpi_source
+    segments:
+      - text: "ส่วนการชำระเงิน คุณลูกค้าชำระผ่าน{payment_channel} เรียบร้อยแล้วนะคะ"
+        facts: [payment]
+    repeat:
+      - text: "ชำระผ่าน{payment_channel}"
+  - id: delivery_channel
+    short: "ช่องทางจัดส่งกรมธรรม์"
+    status: pending_kpi_approval
+    segments:
+      - text: "บริษัทจะส่งเอกสารกรมธรรม์ให้ทาง{delivery_channel} ภายในประมาณ {delivery_period}ค่ะ"
+        facts: [delivery_channel]
+    repeat:
+      - text: "ส่งทาง{delivery_channel} ภายใน {delivery_period}"
+  - id: delivery_target
+    short: "ที่อยู่หรืออีเมลจัดส่ง"
+    status: pending_kpi_approval
+    segments:
+      - text: "ขอทวน{delivery_target_label}นะคะ {delivery_target}"
+        facts: [delivery_target]
+    confirm: "ถูกต้องไหมคะ"
+    repeat:
+      - text: "{delivery_target_label} {delivery_target}"
+
+policy_fields:
+  - {field: plan_name, label: "ชื่อแผน", value: "{plan_name}", keywords: ["แผน", "ชื่อแผน"]}
+  - {field: death_benefit, label: "วงเงินคุ้มครองหลัก (เสียชีวิตจากอุบัติเหตุ)", value: "{death_benefit} บาท", keywords: ["เสียชีวิต", "ทุน", "วงเงิน", "แสน"]}
+  - {field: medical_per_accident, label: "ค่ารักษาพยาบาลต่ออุบัติเหตุ", value: "{medical} บาท", keywords: ["รักษา"], requires: [medical]}
+  - {field: daily_hospital, label: "เงินชดเชยรายได้ (ต่อวัน)", value: "{daily} บาท/วัน สูงสุด {daily_max_days} วัน", keywords: ["ชดเชย", "รายวัน", "วันละ"], requires: [daily, daily_max_days]}
+  - {field: premium, label: "เบี้ยประกันภัย", value: "{premium} บาท/{billing_period}", keywords: ["เบี้ย", "พันบาท", "ราคา"]}
+  - {field: effective_date, label: "วันเริ่มคุ้มครอง", value: "{effective_date} {effective_time}", keywords: ["วันที่", "เริ่ม", "วันเริ่ม", "เวลา"]}
+  - {field: beneficiary, label: "ผู้รับผลประโยชน์", value: "{beneficiary}", keywords: ["ผู้รับ"]}
+  - {field: payment, label: "ช่องทางชำระเงิน", value: "{payment_channel} ({payment_status})", keywords: ["ชำระ", "จ่าย", "บัตร", "โอน"]}
+  - {field: delivery_channel, label: "ช่องทางจัดส่งกรมธรรม์", value: "{delivery_channel} ภายใน {delivery_period}", keywords: ["ช่องทาง", "ส่งทาง", "วันทำการ"]}
+  - {field: delivery_target, label: "ที่อยู่/อีเมลจัดส่ง", value: "{delivery_target}", keywords: ["อีเมล", "เมล", "ที่อยู่", "บ้านเลขที่", "ไปรษณีย์", "ซอย", "ถนน"]}
+
+# Demo FAQ built only from source facts. Every answer is pending KPI approval.
+faq:
+  - id: service_contact
+    keywords: ["เบอร์", "ติดต่อ", "คอลเซ็นเตอร์", "call center"]
+    answer: "ติดต่อศูนย์บริการลูกค้ากรุงไทยพานิชประกันภัยได้ที่ {service_phone} ค่ะ"
+  - id: claim
+    keywords: ["เคลม"]
+    answer: "เรื่องการเคลม ติดต่อศูนย์บริการลูกค้าที่ {service_phone} เพื่อให้เจ้าหน้าที่แนะนำขั้นตอนได้เลยค่ะ"
+  - id: free_look
+    keywords: ["ยกเลิก", "คืนเงิน", "ฟรีลุค", "free look"]
+    answer: "หลังได้รับกรมธรรม์ หากไม่ตรงกับความต้องการ แจ้งยกเลิกได้ภายใน 30 วันนับจากวันที่ได้รับกรมธรรม์ และได้รับเงินคืนเต็มจำนวนค่ะ"
+  - id: delivery_time
+    keywords: ["ได้รับกรมธรรม์", "ส่งกรมธรรม์", "กี่วัน", "เมื่อไหร่จะได้", "จะได้เมื่อ"]
+    answer: "เอกสารกรมธรรม์จะจัดส่งทาง{delivery_channel} ใช้เวลาประมาณ {delivery_period}ค่ะ"
+  - id: motorcycle
+    keywords: ["มอเตอร์ไซค์", "มอไซค์", "จักรยานยนต์"]
+    answer: "กรณีเสียชีวิต สูญเสียอวัยวะ สายตา หรือทุพพลภาพถาวรสิ้นเชิง จากการขับขี่หรือโดยสารรถจักรยานยนต์ คุ้มครอง {motorcycle_benefit} บาทค่ะ"
+    requires: [motorcycle_benefit]
+  - id: public_transport
+    keywords: ["รถสาธารณะ", "รถโดยสาร", "ขนส่งสาธารณะ", "รถเมล์", "รถยนต์ส่วนตัว", "รถยนต์ส่วนบุคคล"]
+    answer: "ผลประโยชน์อุบัติเหตุจากยานพาหนะสาธารณะ หรือรถยนต์ส่วนบุคคล คุ้มครอง {public_transport_benefit} บาทค่ะ"
+    requires: [public_transport_benefit]
+  - id: age
+    keywords: ["อายุ"]
+    answer: "แผนนี้รับผู้เอาประกันอายุ 10 ถึง 70 ปี และต่ออายุได้ถึง 70 ปีค่ะ"

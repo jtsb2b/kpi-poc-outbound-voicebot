@@ -1,0 +1,74 @@
+# Mock demo records. Every value is fictional and labelled MOCK; the plan values follow
+# the KPI email image (PA เต็มใจ) and remain pending KPI confirmation.
+profiles:
+  - profile_id: pa-email
+    campaign: pa_confirmation
+    label: "PA เต็มใจ · ส่งกรมธรรม์ทางอีเมล · บัตรเครดิต"
+    case:
+      record_id: MOCK-PA-001
+      plan_name: "พีเอ เต็มใจ"
+      plan_code: "28P204"
+      death_benefit_thb: 300000
+      medical_per_accident_thb: 15000
+      daily_hospital_thb: 500
+      daily_hospital_max_days: 30
+      motorcycle_benefit_thb: 90000
+      public_transport_benefit_thb: 300000
+      premium_thb: 2000
+      billing_period: "ปี"
+      effective_date: 2026-10-15
+      effective_time: "00.01 น."
+      beneficiary: "นางสาวสมใจ ใจดี (บุตร)"
+      payment_channel: "บัตรเครดิต"
+      payment_status: "ชำระแล้ว"
+      delivery_channel: "อีเมล"
+      delivery_target: "somchai.demo@example.com"
+      delivery_period_text: "7 ถึง 14 วันทำการ"
+      verify_birth_date: 1985-03-15
+  - profile_id: pa-post
+    campaign: pa_confirmation
+    label: "PA เต็มใจ · ส่งทางไปรษณีย์ · ทายาทโดยธรรม · QR Code"
+    case:
+      record_id: MOCK-PA-002
+      plan_name: "พีเอ เต็มใจ"
+      plan_code: "28P204"
+      death_benefit_thb: 300000
+      medical_per_accident_thb: 15000
+      daily_hospital_thb: 500
+      daily_hospital_max_days: 30
+      motorcycle_benefit_thb: 90000
+      public_transport_benefit_thb: 300000
+      premium_thb: 2000
+      billing_period: "ปี"
+      effective_date: 2026-11-01
+      beneficiary: "ทายาทตามกฎหมาย"
+      payment_channel: "คิวอาร์โค้ด"
+      payment_status: "ชำระแล้ว"
+      delivery_channel: "ไปรษณีย์"
+      delivery_target: "99/9 ถนนสาธร แขวงสีลม เขตบางรัก กรุงเทพฯ 10500"
+      verify_birth_date: 1990-07-01
+  - profile_id: survey-surveyor
+    campaign: accident_survey
+    label: "เคสรถชน · มีพนักงานสำรวจภัยไปที่เกิดเหตุ"
+    case:
+      record_id: MOCK-ACC-001
+      case_id: "CLM-MOCK-2026-0001"
+      accident_date: 2026-09-28
+      surveyor_attended: true
+      verify_birth_date: 1988-12-05
+  - profile_id: survey-no-surveyor
+    campaign: accident_survey
+    label: "เคสรถเฉี่ยว · ไม่มีพนักงานสำรวจภัย"
+    case:
+      record_id: MOCK-ACC-002
+      case_id: "CLM-MOCK-2026-0002"
+      accident_date: 2026-10-01
+      surveyor_attended: false
+  - profile_id: survey-unknown
+    campaign: accident_survey
+    label: "เคสไม่ระบุว่ามีพนักงานสำรวจภัยหรือไม่"
+    case:
+      record_id: MOCK-ACC-003
+      case_id: "CLM-MOCK-2026-0003"
+      accident_date: 2026-10-03
+      surveyor_attended: null

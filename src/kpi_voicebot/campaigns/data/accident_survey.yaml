@@ -1,0 +1,148 @@
+# Campaign B: accident-service satisfaction survey. Status meanings: see pa_confirmation.yaml.
+id: accident_survey
+title: สำรวจความพึงพอใจศูนย์รับแจ้งอุบัติเหตุรถยนต์
+version: "2026-10-07.1"
+persona_name: น้องเคพีไอ
+service_phone: "02-624-1111"
+identity:
+  second_factor: null
+limits:
+  max_clarifications: 2
+  max_silences: 3
+  max_faq_questions: 2
+
+wording:
+  greet:
+    status: poc_approved
+    segments: ["สวัสดีค่ะ ขอเรียนสายคุณ{customer_name}ค่ะ"]
+  identity_recheck:
+    status: poc_approved
+    segments: ["ขออนุญาตเรียนสาย คุณ{customer_name} ใช่ไหมคะ"]
+  second_factor_ask:
+    status: pending_kpi_approval
+    segments: ["ก่อนเริ่ม ขออนุญาตยืนยันตัวตนนะคะ รบกวนแจ้งวันและเดือนเกิดของคุณลูกค้าค่ะ"]
+  second_factor_retry:
+    status: pending_kpi_approval
+    segments: ["ขออภัยค่ะ ข้อมูลยังไม่ตรง รบกวนแจ้งวันและเดือนเกิดอีกครั้งนะคะ"]
+  intro:
+    verbatim: true
+    status: poc_approved
+    segments:
+      - "ดิฉัน {persona_name} เป็น AI ผู้ช่วย ติดต่อจากศูนย์บริการลูกค้า บริษัท กรุงไทยพานิชประกันภัย จำกัด (มหาชน) ค่ะ"
+      - "วันนี้ขอเวลาประมาณ 2 ถึง 3 นาที สอบถามความพึงพอใจ"
+      - "เรื่องการรับแจ้งอุบัติเหตุรถยนต์ เมื่อวันที่ {accident_date} ที่ผ่านมา"
+      - "เพื่อนำไปพัฒนาบริการให้ดียิ่งขึ้นค่ะ"
+      - "ตอนนี้สะดวกพูดคุยไหมคะ"
+  availability_short:
+    status: poc_approved
+    segments: ["ตอนนี้สะดวกคุยประมาณ 2 ถึง 3 นาทีไหมคะ"]
+  notice:
+    verbatim: true
+    status: poc_approved
+    segments:
+      - "ขอบพระคุณค่ะ ขอแจ้งให้ทราบว่า การสนทนานี้จะถูกบันทึกเสียง เพื่อรักษาผลประโยชน์ของคุณลูกค้า และใช้ปรับปรุงคุณภาพการให้บริการนะคะ"
+  scale_intro:
+    status: kpi_source
+    segments: ["การประเมินมีคะแนน 1 ถึง 5 นะคะ 5 คือพึงพอใจมากที่สุด และ 1 คือพึงพอใจน้อยที่สุดค่ะ"]
+  section1:
+    status: kpi_source
+    segments: ["คำถามส่วนแรก เกี่ยวกับศูนย์รับแจ้งอุบัติเหตุ และพนักงานรับแจ้งเหตุทางโทรศัพท์ค่ะ"]
+  section2:
+    status: kpi_source
+    segments: ["คำถามส่วนที่สอง เกี่ยวกับพนักงานสำรวจภัยหรือพนักงานเคลม ที่เดินทางไปให้บริการที่จุดเกิดเหตุค่ะ"]
+  surveyor_check:
+    status: poc_approved
+    segments: ["วันนั้นมีพนักงานสำรวจภัยเดินทางไปที่จุดเกิดเหตุไหมคะ"]
+  section2_na:
+    status: poc_approved
+    segments: ["ไม่เป็นไรค่ะ ส่วนของพนักงานสำรวจภัย ดิฉันจะข้ามไปนะคะ"]
+  section3:
+    status: pending_kpi_approval
+    segments:
+      - "คำถามสุดท้าย เกี่ยวกับประสบการณ์ที่ได้รับจากการบริการของกรุงไทยพานิชประกันภัยในครั้งนี้ค่ะ"
+      - "คะแนนเป็น 0 ถึง 10 นะคะ 0 คือไม่แนะนำแน่นอน และ 10 คือแนะนำอย่างแน่นอน"
+  final_comment:
+    status: kpi_source
+    segments: ["เพื่อพัฒนาบริการให้ดียิ่งขึ้น คุณลูกค้ามีข้อเสนอแนะ หรือคำติชมเพิ่มเติมไหมคะ"]
+  escalation_ack:
+    status: poc_approved
+    segments: ["ดิฉันบันทึกเรื่องนี้ไว้ให้เจ้าหน้าที่ติดต่อกลับนะคะ"]
+  safety_advice:
+    status: pending_kpi_approval
+    segments: ["หากเป็นเรื่องเร่งด่วนหรือมีผู้บาดเจ็บ ติดต่อศูนย์บริการลูกค้าได้ทันทีที่ {service_phone} ตลอด 24 ชั่วโมงค่ะ"]
+  score_out_of_range:
+    status: poc_approved
+    segments: ["คะแนนข้อนี้อยู่ระหว่าง {scale_min} ถึง {scale_max} ค่ะ ให้กี่คะแนนดีคะ"]
+  score_clarify:
+    status: poc_approved
+    segments: ["ถ้าให้เป็นคะแนน {scale_min} ถึง {scale_max} ข้อนี้ให้กี่คะแนนดีคะ"]
+  score_ambiguous:
+    status: poc_approved
+    segments: ["ขอเป็นคะแนนเดียวนะคะ {options} ดีคะ"]
+  reflect_note:
+    status: poc_approved
+    segments: ["เรื่อง{reflection} ดิฉันจดไว้นะคะ"]
+  score_echo:
+    status: poc_approved
+    segments: ["{value} คะแนนนะคะ"]
+  reflect_escalation:
+    status: poc_approved
+    segments: ["เรื่อง{reflection} ดิฉันบันทึกไว้ให้เจ้าหน้าที่ติดต่อกลับนะคะ"]
+  correction_ack:
+    status: poc_approved
+    segments: ["ได้ค่ะ แก้{question_label}เป็น {value} คะแนนนะคะ"]
+  closing:
+    status: kpi_source
+    segments:
+      - "ทางบริษัทขอน้อมรับทุกข้อเสนอแนะ เพื่อนำไปปรับปรุงการให้บริการค่ะ"
+      - "หากต้องการสอบถามหรือต้องการความช่วยเหลือ ติดต่อศูนย์บริการลูกค้าได้ที่ {service_phone} ตลอด 24 ชั่วโมงนะคะ"
+      - "ขอบพระคุณที่สละเวลา และขอให้เดินทางปลอดภัยค่ะ สวัสดีค่ะ"
+
+acknowledgements: ["ค่ะ", "ขอบคุณค่ะ", "รับทราบค่ะ", "ได้ค่ะ"]
+feedback_acknowledgements: ["ขอบคุณที่บอกนะคะ ดิฉันบันทึกไว้แล้วค่ะ", "รับทราบค่ะ ขอบคุณสำหรับข้อเสนอแนะค่ะ", "ขอบคุณค่ะ ดิฉันจดไว้แล้วนะคะ"]
+
+questions:
+  - id: q1
+    section: 1
+    label: "ความสะดวกในการติดต่อศูนย์รับแจ้งอุบัติเหตุ"
+    scale: [1, 5]
+    feedback_range: [1, 3]
+    ask: "ในเรื่องความสะดวกในการติดต่อศูนย์รับแจ้งอุบัติเหตุ คุณลูกค้าให้กี่คะแนนดีคะ"
+    short: "ความสะดวกในการติดต่อศูนย์รับแจ้งอุบัติเหตุ ให้กี่คะแนนคะ"
+    feedback: "ขออภัยในความไม่สะดวกค่ะ ไม่ทราบว่าการติดต่อศูนย์ติดขัดตรงไหนคะ"
+  - id: q2
+    section: 1
+    label: "ความพึงพอใจโดยรวมต่อศูนย์รับแจ้งอุบัติเหตุ"
+    scale: [1, 5]
+    feedback_range: [1, 3]
+    ask: "แล้วความพึงพอใจโดยรวมต่อการให้บริการของศูนย์รับแจ้งอุบัติเหตุ ให้กี่คะแนนดีคะ"
+    short: "ความพึงพอใจโดยรวมต่อศูนย์รับแจ้งอุบัติเหตุ ให้กี่คะแนนคะ"
+    feedback: "มีส่วนไหนที่อยากให้ศูนย์รับแจ้งอุบัติเหตุปรับปรุงไหมคะ"
+  - id: q3
+    section: 2
+    label: "ความรวดเร็วในการเดินทางถึงที่เกิดเหตุของพนักงานสำรวจภัย"
+    scale: [1, 5]
+    feedback_range: [1, 3]
+    allow_na: true
+    ask: "ในเรื่องความรวดเร็วในการเดินทางถึงที่เกิดเหตุของพนักงานสำรวจภัย คุณลูกค้าให้กี่คะแนนดีคะ"
+    short: "ความรวดเร็วในการเดินทางของพนักงานสำรวจภัย ให้กี่คะแนนคะ"
+    feedback: "อยากให้ปรับปรุงเรื่องความรวดเร็วตรงไหนบ้างคะ"
+  - id: q4
+    section: 2
+    label: "ความพึงพอใจโดยรวมต่อการให้บริการสำรวจอุบัติเหตุ"
+    scale: [1, 5]
+    feedback_range: [1, 3]
+    allow_na: true
+    ask: "และความพึงพอใจโดยรวมต่อการให้บริการสำรวจอุบัติเหตุ ให้กี่คะแนนดีคะ"
+    short: "ความพึงพอใจโดยรวมต่อการสำรวจอุบัติเหตุ ให้กี่คะแนนคะ"
+    feedback: "มีส่วนไหนของการให้บริการสำรวจอุบัติเหตุที่อยากให้ปรับปรุงไหมคะ"
+  - id: q5
+    section: 3
+    label: "ประสบการณ์การบริการของกรุงไทยพานิชประกันภัย (0-10)"
+    scale: [0, 10]
+    feedback_range: [0, 8]        # approved POC default; KPI source says 1-8
+    ask: "ในเรื่องประสบการณ์ที่ได้รับจากการบริการในครั้งนี้ คุณลูกค้าให้กี่คะแนนดีคะ"
+    short: "ประสบการณ์การบริการครั้งนี้ ให้กี่คะแนน จาก 0 ถึง 10 คะ"
+    feedback: "มีเรื่องไหนที่อยากให้เราปรับปรุง เพื่อให้บริการดีขึ้นไหมคะ"
+
+faq: []
