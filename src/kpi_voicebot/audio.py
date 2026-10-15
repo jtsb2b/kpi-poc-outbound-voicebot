@@ -6,7 +6,7 @@ Every 10 ms of microphone (later: telephone) audio passes through:
    and loud callers reach the recogniser at a similar level.
 2. Silero VAD (voice activity detection) on the cleaned audio: when speech starts and stops.
 
-The cleaned audio is what JaiASR receives. VAD drives the human parts of turn-taking: a barge-in
+The cleaned audio is what the recogniser receives. VAD drives the human parts of turn-taking: a barge-in
 is a sustained phrase, not a cough or a quick "ครับ"; silence timers run on real silence, not on
 the absence of transcripts. For phone calls the same front end sits behind LiveKit, where LiveKit
 Cloud's telephony noise cancellation can be added in front of it.

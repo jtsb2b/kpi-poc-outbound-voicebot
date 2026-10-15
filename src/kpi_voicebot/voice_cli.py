@@ -152,7 +152,7 @@ def _resample(pcm: bytes, src: int, dst: int) -> bytes:
 
 
 async def asr_bench() -> None:
-    """Speak typical customer replies with JAI TTS, stream them to JaiASR at real-time pace,
+    """Speak typical customer replies with JAI TTS, stream them to the configured recogniser at real-time pace,
     and report what it heard and how fast the turn was committed."""
     import difflib
 
@@ -208,7 +208,7 @@ def main() -> None:
     p = sub.add_parser("prerender", help="verify and cache every scripted turn (no wait during calls)")
     p.add_argument("profile", nargs="?", default="all", help="profile id, or 'all'")
     sub.add_parser("lengths", help="measure the real spoken length of every scripted bot turn")
-    sub.add_parser("asr-bench", help="JaiASR accuracy and commit latency on typical customer replies")
+    sub.add_parser("asr-bench", help="recogniser accuracy and end-of-turn latency on typical customer replies")
     s = sub.add_parser("say", help="speak one line with the configured voice")
     s.add_argument("text")
     args = parser.parse_args()

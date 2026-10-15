@@ -15,12 +15,12 @@ Outbound Thai voicebot POC for KPI (กรุงไทยพานิชปร�
 | FastAPI + Swagger (`/docs`), Excel import/export | done |
 | Operator UI (React/Vite) | done |
 | Text simulator (UI scenarios, `kpi-sim` CLI) | done |
-| LLM reply understanding and wording (self-hosted OpenThai 2.0 27B on the JTS gateway since 15 Oct 2026, previously Qwen 3.8 Flash; `INTERPRETER=llm`) | done: strict JSON-schema reading in context, rule safety layer, rule fallback on any error/429 |
+| LLM (self-hosted OpenThai 2.0 27B on the JTS gateway since 15 Oct 2026, previously Qwen 3.8 Flash; `INTERPRETER=llm`) | done: leads the conversation from the knowledge base (agent mode); approved wording on any error |
 | Voice: JAI TTS (JTS, ≈0.12 s to first audio, clause-streamed PCM), Thai normaliser; Gemini Live only as an explicit option | done |
-| Speech recognition: Soniox real-time (`ASR_PROVIDER=soniox`, default since 15 Oct 2026 while JaiASR is in maintenance) or JaiASR-Flash (`ASR_PROVIDER=jai`); turn-taking (`TurnCollector`), microphone test mode | done; front end with WebRTC echo cancellation, noise suppression, gain control and Silero VAD |
+| Speech recognition: Soniox real-time `stt-rt-v5` (`ASR_PROVIDER=soniox`, the default since 15 Oct 2026); JaiASR-Flash stays selectable (`ASR_PROVIDER=jai`) while it is in maintenance | done: turn-taking (`TurnCollector`), Silero VAD, ai-coustics noise reduction on calls, microphone test mode |
 | Approved knowledge base for the LLM (`campaigns/knowledge/*.th.md`, built from the approved scripts and FAQ) | done: fixed prompt prefix (cached by the gateway), guarded so its facts can be used but not stretched |
 | LLM-led conversation (`agent.py`, `CONVERSATION_MODE=agent`, default with `INTERPRETER=llm`) | done: the model talks freely from the knowledge base against a checklist; code keeps the disclosures word for word, the facts exact, the results and the close; `scripted` keeps the old reworded-script mode |
-| Phone calls over LiveKit Cloud SIP (trunk `ST_NbZaAsMDs5Br`, From 2211 → 02-100-4148, ai-coustics QUAIL_VF_S on the caller's audio as in the inbound bot), shared voice loop with barge-in, `kpi-call` test command, live mode in the UI | built; LiveKit connection verified without dialling; **first live test call pending** |
+| Phone calls over LiveKit Cloud SIP (trunk `ST_NbZaAsMDs5Br`, From 2211 → 02-100-4148, ai-coustics QUAIL_VF_S on the caller's audio as in the inbound bot), shared voice loop with barge-in, `kpi-call` test command, live mode in the UI | done: live calls tested 14–16 Oct 2026; audio is laggy because LiveKit Cloud routes Bangkok through India (see `DEPLOYMENT_HANDOFF.md`) |
 | Call recording to Tencent COS (`recording.py`: LiveKit egress, room audio as Opus, deleted if the customer objects) | built and tested without COS (LiveKit accepts the egress); **needs the COS settings in `.env`** |
 | Docker Compose (`docker-compose.yml`: MongoDB, API, worker, web on http://localhost:8080; see `DEPLOYMENT_HANDOFF.md`) and GitHub Actions CI (lint, types, tests, web build, image builds; no secrets, never dials) | done and run locally; deployment waits for localhost acceptance and a Bangkok-side LiveKit route |
 
@@ -40,12 +40,12 @@ src/kpi_voicebot/
   service.py        call request validation
   worker.py         claims one call at a time and runs it (simulated or live)
   simulator.py      scripted/typed customer replies (kpi-sim)
-  voice_session.py  the spoken conversation loop: front end → JaiASR → dialogue → JAI TTS, barge-in, hang-up
+  voice_session.py  the spoken conversation loop: front end → Soniox (or JaiASR) → dialogue → JAI TTS, barge-in, hang-up
   playback.py       streams TTS to the speakers or a LiveKit track; read-ahead of the prepared turn
   telephony.py      LiveKit room + SIP dial (once, never redialled), ringing/hang-up, kpi-call CLI
   mic.py            the same loop on this computer's microphone (kpi-sim chat --mic)
   agent.py          LLM-led conversation: one model turn per reply, checklist + rules kept by code
-  soniox_asr.py     Soniox real-time recogniser (same interface as the JaiASR client in asr.py)
+  soniox_asr.py     Soniox real-time recogniser (the default; same interface as the JaiASR client in asr.py)
   recording.py      call recording: LiveKit egress to Tencent COS; deletion on objection (S3 SigV4)
   knowledge.py      loads campaigns/knowledge/: approved knowledge the LLM may use (no customer data)
   excel_io.py       import, export (formula-safe), template
@@ -106,55 +106,40 @@ uv run kpi-sim chat pa-email
 
 In chat mode you type as the customer. Commands: `/silence`, `/hangup`, and `/interrupt <n> <text>` (the bot is cut off after `n` segments).
 
-### LLM understanding (OpenThai 2.0)
+### The LLM conversation (OpenThai 2.0)
 
-With `INTERPRETER=llm` and the `LLM_*` values in `.env`, the worker asks the LLM to read each customer reply in
-context (the question just asked and the last turns) and return strict JSON. The engine still decides
-everything:
+With `INTERPRETER=llm` and the `LLM_*` values in `.env`, the self-hosted LLM leads the call
+(`agent.py`, `CONVERSATION_MODE=agent`, the default). Like a person on the phone, it decides what to say
+each turn: it reacts to what the customer said, answers questions from the approved knowledge base
+(`campaigns/knowledge/*.th.md`) and the call's own facts, and moves the call along in its own words. It is
+given a checklist, not a script: who we are talking to, the recording notice, each policy item or survey
+question, the free-look notice, questions, close.
 
-- Call-ending signals (do-not-call, objection, wrong person, refusal) and score numbers come from the rule
-  parser only.
-- Model intents count only when they fit the pending question.
-- In free-text answers the model contributes escalation tags only.
-- Any timeout, HTTP error or 429 falls back to the rules for that turn and is logged as an `llm_fallback_rules`
-  call event.
+One model call per turn returns what to say and what the customer settled. The code keeps only what is not
+the model's to change:
 
-Conversation repair, which works with or without the LLM, follows what a human operator would do:
+- the AI disclosure, the recording notice and the free-look notice are said word for word (a paraphrase is
+  replaced with the approved wording);
+- no number, condition or limiting claim that the call's facts or the knowledge base do not back
+  (a policy sentence must mostly match approved text);
+- a female voice ("ดิฉัน", ค่ะ/คะ; a stray ครับ is corrected), no Markdown or links;
+- an item counts as confirmed only after the customer heard its values; a plain "ครับ" after an item
+  confirms it; a survey score must be on its scale;
+- the call cannot close as completed with items left.
 
-- Hedged answers ("มั้งครับ") get one explicit re-check with just the key values. If the customer is still
-  unsure, the item is recorded as unclear for staff and the bot moves on.
-- "มีครับ" or "อยากสอบถาม" invites the question instead of answering it.
-- "ขออีกที" repeats only the item's key values.
-- Nonsense or off-topic replies are never taken as a yes; the model can abstain with `unclear`.
-- On complaints and low scores the bot briefly reflects the customer's own words back. This is a guarded
-  phrase from the LLM: it must be built from the customer's words, contain no numbers, and make no promises.
-- **The bot words its own turns** (`responder.py`). The engine decides what happens next and writes a draft
-  from approved wording. The LLM then says it the way an experienced agent would: it reacts to what the customer
-  just said, answers from the call's fact sheet (policy values plus FAQ) where it can, and words each turn
-  freshly. A guard checks every reply, and the approved draft is spoken instead if any check fails:
-  - every number, email, web address and policy value stays exactly as in the draft;
-  - no number appears that isn't in the draft, the fact sheet or the customer's own words;
-  - the recording notice, AI disclosure and free-look stay word for word;
-  - questions stay questions, the voice stays female ("ดิฉัน", never "ครับ/ผม/น้อง"), nothing is promised,
-    and no limiting claims ("เท่านั้น", "เพียง"…) that aren't in the approved text;
-  - no Thai typos (dropped vowel or tone marks), no repeated lines, not much longer than the draft.
-  When a disputed fact comes up, the bot takes note and never argues or explains it away.
-- **The likely next turn is prepared in advance.** While the bot speaks, the turn that follows a plain "ครับ" is
-  worded (and, in voice mode, read aloud into a buffer), so most turns answer with no model wait. Other replies
-  take about 1–1.5 s (understanding plus wording).
-- Policy facts are read like an operator reads them: one fact per turn as a statement ("…บาทนะคะ"), which the
-  customer acknowledges with "ครับ / อืม / อ่าฮะ". Only details the customer must check themselves are asked as
-  questions: the beneficiary ("ใช่ไหมคะ") and the e-mail or address ("ถูกต้องไหมคะ"). After a bare "ครับ" the next
-  fact follows without a "ค่ะ / รับทราบค่ะ" in front.
-- Clear short replies ("ครับ", "ใช่ครับ", "ไม่มีครับ") skip the model, which removes 0.5–3 s of silence on most turns.
-- Off-topic questions ("1+1 เท่ากับเท่าไหร่") get a polite "ตอบได้เฉพาะเรื่องกรมธรรม์" and no call-back task. A question
-  asked mid-explanation ("รายละเอียดอะไรครับ") is answered by what the bot says next, not parked for a call-back.
-- Particles are tidied: คะ on questions, and no ค่ะ on a fact that runs into its check question.
-- Turns are never chopped into parts: the customer can cut in at any time (barge-in), and only the unheard rest is resumed.
+A reply that breaks a rule is sent back once with the reason; if the retry fails too, the approved line
+for the next step is said (or, for a question, an honest "ยังไม่มีข้อมูลที่ยืนยันได้" and a call-back task).
+The approved statements themselves are said without a model call when the customer just says "ครับ", and the
+reply to a plain "ครับ" is prepared while the bot is still speaking.
 
-Measured on 8 Oct 2026: understanding takes about 0.4–0.9 s and 1.3k tokens; wording a turn takes about 0.5–1 s and 1.9k tokens. With preparation that is roughly 4–5k tokens per customer turn, or about 25k tokens/min at real call pace.
+Measured on 15 Oct 2026 in role-played calls: a reply takes about 1–2 s; the knowledge-base prompt prefix is
+cached by the gateway (≈0.2 s). The gateway returns replies only when complete, so speaking before the
+reply is finished is not possible yet. A turn never waits more than `LLM_MAX_QUEUE_SECONDS` (0.3 s) for the
+client-side budget (`LLM_TOKENS_PER_MINUTE`, off by default); over budget it uses the approved wording.
 
-The gateway rate-limits at about 60k tokens/min, so keep `LLM_TOKENS_PER_MINUTE` under that.
+`CONVERSATION_MODE=scripted` keeps the earlier design: the engine (`engine.py`) decides each turn from the
+approved wording and the LLM only rewords it (`responder.py`). With `INTERPRETER=rules` there is no LLM at
+all; the simulator scenarios run this way.
 
 Try it from the terminal:
 
@@ -172,7 +157,7 @@ Opt-in live test (uses quota):
 LIVE_LLM=1 uv run pytest tests/test_llm_live.py
 ```
 
-### Speech: JaiASR in, JAI TTS out
+### Speech: Soniox in, JAI TTS out
 
 **Voice (`jaitts.py`).** JAI TTS (JTS's VoxCPM model, speaker-adapted female voice), streamed as raw
 44.1 kHz PCM. Measured on 12 Oct 2026: first audio ≈0.12 s, generation ≈8× faster than real time,
@@ -190,28 +175,34 @@ Latin reaches it:
   any other English word is said (Excel → เอ็กเซล) or spelled. Gemini Live remains available only with `TTS_PROVIDER=gemini`;
 it is never a fallback.
 
-**Recognition (`asr.py`).** JaiASR-Flash-v1.0 over WebSocket: `start` (language Thai, 0.5 s chunks, and a
-per-call context of the customer's name, plan, beneficiary and contact details), 16 kHz PCM in 0.1 s
-frames, then `partial` / `commit` / `final`. The file endpoint (`transcribe_file`) is for tests.
+**Recognition.** Soniox real-time (`soniox_asr.py`, model `stt-rt-v5`, Thai with English hints) is the
+default since 15 Oct 2026, when JaiASR went into maintenance and fine-tuning. Each call passes its own terms
+(customer name, plan, beneficiary, e-mail) so they are recognised correctly; Soniox only uses them as hints.
+Soniox ends an utterance with its own endpoint detection (`SONIOX_MAX_ENDPOINT_DELAY_MS`, 800 ms by
+default). JaiASR-Flash (`asr.py`, `ASR_PROVIDER=jai`) uses the same interface and stays selectable; there is
+never a silent fallback from one to the other.
 
-**Audio front end (`audio.py`).** Every 10 ms of incoming audio goes through LiveKit's WebRTC audio
-processing (echo cancellation against what the bot is playing, noise suppression, high-pass filter,
-automatic gain control) and then Silero VAD. JaiASR receives the cleaned audio. Measured on 12 Oct 2026 with
-JAI TTS speech under loud hiss at real-time pace: speech start detected 0.22 s after it began, end 0.38 s
-after it stopped, noise floor −10.8 dB with the speech level kept. For phone calls the same front end sits
-behind LiveKit, where LiveKit Cloud's telephony noise cancellation can go in front of it.
+**Audio front end (`audio.py`).**
+- On phone calls, as in the inbound voicebot: ai-coustics `QUAIL_VF_S` cleans the caller's audio
+  (`PHONE_NOISE_CANCELLATION=ai_coustics`), nothing else is applied on top, and Silero VAD runs with its
+  defaults (activation 0.5, 0.55 s of silence ends speech). The earlier stack (Krisp plus WebRTC suppression
+  and gain control) clipped speech.
+- In the desk test on computer speakers, LiveKit's WebRTC processing (echo cancellation against what the
+  bot is playing, noise suppression, gain control) runs before Silero VAD.
 
-**Turn-taking (`TurnCollector`, `mic.py`).**
-- A short answer ends at JaiASR's commit (0.5 s of silence). Open answers (feedback, comments,
-  discrepancy details, questions) wait 1.2 s more and join the next commit, so a pause mid-thought does not
-  cut the customer off.
+**Turn-taking (`TurnCollector`, `voice_session.py`).**
+- A short answer ends at the recogniser's end of utterance. Open answers (feedback, comments, discrepancy
+  details, questions) wait 1.2 s more and join the next utterance, so a pause mid-thought does not cut the
+  customer off.
 - 7 s of silence makes the bot check the customer is still there.
+- On a phone call the bot greets as soon as the call is answered; a "ฮัลโหล" said over the greeting does not
+  stop it and does not count as the answer.
 - Barge-in: while the bot speaks, sustained speech (VAD over 0.7 s) or recognised words that are more than
-  "ครับ / อืม" stop the voice, and only the segments actually heard count as delivered. Allowed with
-  `--headphones`, or on speakers with `--aec` (echo cancellation plus a guard that drops anything that is
-  just the bot's own words coming back). By default on speakers the microphone is muted while the bot speaks.
+  "ครับ / อืม" stop the voice, and only the segments actually heard count as delivered. In the desk test it is
+  allowed with `--headphones`, or on speakers with `--aec` (recognised words only, plus a guard that drops
+  the bot's own words coming back); by default the microphone is muted while the bot speaks.
 
-Talk to the bot from this computer (needs the JaiASR session to be up):
+Talk to the bot from this computer (uses the recogniser set by `ASR_PROVIDER`):
 
 ```bash
 uv run kpi-sim chat pa-email --llm --mic
@@ -237,7 +228,7 @@ uv run kpi-tts say "ค่ารักษาพยาบาลต่ออุบ
 
 - `chat --voice`: type the customer's replies, hear the bot.
 - `asr-bench`: JAI TTS speaks typical customer replies ("ครับ", "อ่าห้ะ", "ถั่วต้ม", a disputed amount, a
-  call-back time…), they stream to JaiASR at real-time pace, and it reports what was heard and how soon
+  call-back time…), they stream to the configured recogniser at real-time pace, and it reports what was heard and how soon
   after the speech the turn was committed.
 
 ## Checks
