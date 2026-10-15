@@ -176,8 +176,14 @@ class TurnCache:
 
     def __init__(self, root: Path, model: str, voice: str, style: str) -> None:
         self.dir = root / model / voice
-        self.dir.mkdir(parents=True, exist_ok=True)
         self.salt = style
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            self.enabled = True
+        except OSError as exc:
+            # The cache only saves re-rendering a line; a call must never fail without it.
+            log.warning("voice cache off, %s is not writable (%s)", self.dir, exc)
+            self.enabled = False
 
     def path(self, spoken: str) -> Path:
         digest = hashlib.sha256(f"{self.salt}\n{spoken}".encode()).hexdigest()[:24]
@@ -185,9 +191,11 @@ class TurnCache:
 
     def get(self, spoken: str) -> bytes | None:
         p = self.path(spoken)
-        return p.read_bytes() if p.exists() else None
+        return p.read_bytes() if self.enabled and p.exists() else None
 
     def put(self, spoken: str, pcm: bytes) -> None:
+        if not self.enabled:
+            return
         tmp = self.path(spoken).with_suffix(".tmp")
         tmp.write_bytes(pcm)
         tmp.replace(self.path(spoken))

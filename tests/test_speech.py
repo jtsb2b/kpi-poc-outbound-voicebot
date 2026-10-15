@@ -180,3 +180,17 @@ def test_no_latin_script_reaches_the_thai_voice() -> None:
     import re
 
     assert not re.search(r"[A-Za-z]", speakable("ดาวน์โหลด Excel หรือแอด LINE ได้ค่ะ ZX9"))
+
+
+def test_an_unwritable_voice_cache_turns_caching_off_instead_of_failing(tmp_path: Path) -> None:
+    from kpi_voicebot.tts import TurnCache
+
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)  # like a root-owned volume seen by the app user
+    try:
+        cache = TurnCache(locked, "jaitts", "meera", "style")
+        cache.put("สวัสดีค่ะ", b"\x00\x01")
+        assert (cache.enabled, cache.get("สวัสดีค่ะ")) == (False, None)
+    finally:
+        locked.chmod(0o700)
