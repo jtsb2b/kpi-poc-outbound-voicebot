@@ -1,0 +1,588 @@
+/* Liquid Glass: the console's material layer, in light and dark.
+   Content sits in clear glass over a quiet lit field: a high-key white void with a faint azure
+   glow in light, frosted graphite over a deep navy night in dark. Every glass surface shares
+   one recipe: a translucent fill, a heavy blur with a saturation lift, a specular rim that is
+   brightest along the top edge, and a soft navy shadow. Motion is short and critically damped. */
+
+:root {
+  /* Critically damped, like iOS sheets and segmented controls: fast start, no overshoot. */
+  --ease-glass: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-snap: cubic-bezier(0.16, 1, 0.3, 1);
+  --glass-blur: blur(26px) saturate(185%);
+  --glass-rim: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(255, 255, 255, 0.4) 20%,
+    rgba(255, 255, 255, 0.08) 58%,
+    rgba(255, 255, 255, 0.5) 100%
+  );
+  --glass-ground: #f3f6fb;
+  --glass-field:
+    radial-gradient(42vmax 32vmax at 4% -4%, rgba(120, 172, 252, 0.38), transparent 70%),
+    radial-gradient(36vmax 28vmax at 100% 6%, rgba(86, 190, 214, 0.26), transparent 70%),
+    radial-gradient(40vmax 30vmax at 78% 104%, rgba(140, 128, 230, 0.16), transparent 70%),
+    radial-gradient(38vmax 30vmax at 6% 100%, rgba(44, 103, 198, 0.12), transparent 70%);
+  --glass-bar: rgba(255, 255, 255, 0.58);
+  --glass-sheet: rgba(240, 244, 251, 0.9);
+  --glass-dock: rgba(255, 255, 255, 0.52);
+  --glass-dock-rim: inset 0 1px 0 rgba(255, 255, 255, 0.9), inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+  --glass-lift: 0 1px 1px rgba(19, 49, 95, 0.04), 0 14px 34px rgba(19, 49, 95, 0.1);
+  --glass-float: 0 14px 38px rgba(19, 49, 95, 0.16);
+  --thumb-bg: rgba(255, 255, 255, 0.95);
+  --thumb-shadow: inset 0 1px 0 #fff, 0 2px 8px rgba(19, 49, 95, 0.14), 0 0 0 0.5px rgba(19, 49, 95, 0.06);
+  --accent-fill: #2c67c6;
+  --accent-fill-hover: #2457aa;
+  --call-glass: radial-gradient(120% 140% at 0% 0%, rgba(28, 63, 120, 0.86) 0%, rgba(19, 49, 95, 0.92) 62%);
+
+  --surface: rgba(255, 255, 255, 0.62);
+  --surface-2: rgba(255, 255, 255, 0.55);
+  --fill: rgba(19, 49, 95, 0.065);
+  --separator: rgba(19, 49, 95, 0.09);
+  --shadow-group: var(--glass-lift);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --glass-rim: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.42) 0%,
+    rgba(255, 255, 255, 0.1) 22%,
+    rgba(255, 255, 255, 0.03) 60%,
+    rgba(255, 255, 255, 0.12) 100%
+  );
+  --glass-ground: #0a1122;
+  --glass-field:
+    radial-gradient(42vmax 32vmax at 4% -4%, rgba(44, 103, 198, 0.55), transparent 70%),
+    radial-gradient(34vmax 26vmax at 100% 8%, rgba(86, 190, 214, 0.22), transparent 70%),
+    radial-gradient(44vmax 34vmax at 70% 108%, rgba(84, 70, 190, 0.32), transparent 70%);
+  --glass-bar: rgba(24, 33, 54, 0.55);
+  --glass-sheet: rgba(12, 19, 36, 0.9);
+  --glass-dock: rgba(24, 33, 54, 0.58);
+  --glass-dock-rim: inset 0 1px 0 rgba(255, 255, 255, 0.2), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
+  --glass-lift: 0 1px 1px rgba(0, 0, 0, 0.2), 0 18px 44px rgba(2, 6, 18, 0.45);
+  --glass-float: 0 16px 44px rgba(2, 6, 18, 0.55);
+  --thumb-bg: rgba(255, 255, 255, 0.16);
+  --thumb-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 2px 10px rgba(2, 6, 18, 0.4);
+  --accent-fill: #2c67c6;
+  --accent-fill-hover: #3674d6;
+  --call-glass: radial-gradient(120% 140% at 0% 0%, rgba(44, 103, 198, 0.42) 0%, rgba(16, 32, 64, 0.6) 65%);
+
+  --bg: #0a1122;
+  --surface: rgba(30, 40, 64, 0.5);
+  --surface-2: rgba(255, 255, 255, 0.05);
+  --fill: rgba(255, 255, 255, 0.09);
+  --separator: rgba(255, 255, 255, 0.09);
+  --separator-strong: rgba(255, 255, 255, 0.2);
+  --ink: #f2f5fb;
+  --ink-2: #aab7cc;
+  --ink-3: #9ba8be;
+  /* Blue as text and selection on the dark field; fills keep KPI blue for white-label contrast. */
+  --kpi-blue: #82b1ff;
+  --kpi-blue-press: #a3c5ff;
+  --kpi-blue-tint: rgba(110, 160, 255, 0.16);
+  --kpi-navy: #d5e3ff;
+  --good: #86e0a6;
+  --good-bg: rgba(95, 211, 138, 0.15);
+  --warn: #ffc56e;
+  --warn-bg: rgba(255, 176, 64, 0.15);
+  --bad: #ffa1a1;
+  --bad-bg: rgba(255, 110, 110, 0.15);
+}
+
+/* ---------- the lit field ---------- */
+body {
+  background: var(--glass-ground);
+  min-height: 100svh;
+  transition: background-color 0.4s var(--ease-glass);
+}
+body::before {
+  content: "";
+  position: fixed;
+  inset: -10vmax;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--glass-field);
+  filter: blur(40px);
+  animation: field-drift 40s ease-in-out infinite alternate;
+}
+@keyframes field-drift {
+  to {
+    transform: translate3d(2.5vmax, -1.5vmax, 0) rotate(3deg) scale(1.04);
+  }
+}
+::selection {
+  background: rgba(44, 103, 198, 0.24);
+}
+:root[data-theme="dark"] ::selection {
+  background: rgba(130, 177, 255, 0.32);
+}
+:root[data-theme="dark"] * {
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+/* ---------- glass surfaces ---------- */
+.group,
+.tile,
+.panel,
+.outcome {
+  background: var(--surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+.group,
+.panel,
+.outcome,
+.call-head,
+.topbar-inner,
+.auth-form-card {
+  position: relative;
+}
+/* The specular rim: a 1px gradient ring, brightest along the top edge. */
+:is(.group, .tile, .panel, .outcome, .call-head, .topbar-inner, .auth-form-card, .call-dock)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: var(--glass-rim);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+  pointer-events: none;
+  opacity: var(--rim-opacity, 1);
+}
+.tile[aria-checked="true"] {
+  background: color-mix(in srgb, var(--surface) 55%, #fff);
+}
+:root[data-theme="dark"] .tile[aria-checked="true"] {
+  background: rgba(44, 103, 198, 0.26);
+}
+:root[data-theme="dark"] .tile[aria-checked="true"] .tile-icon,
+:root[data-theme="dark"] .choice input:checked + .check,
+:root[data-theme="dark"] .tile[aria-checked="true"] .tile-check {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+}
+.choice:hover,
+.table tbody tr:hover {
+  background: color-mix(in srgb, var(--surface-2) 70%, transparent);
+}
+
+/* ---------- floating capsule bar ---------- */
+.topbar {
+  background: transparent;
+  border-bottom: 0;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  padding: 0.6rem 1rem 0;
+  view-transition-name: topbar;
+}
+.topbar-inner {
+  border-radius: 999px;
+  padding: 0.4rem 0.45rem 0.4rem 1rem;
+  background: var(--glass-bar);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-float);
+}
+.brand-logo {
+  height: 2.2rem;
+}
+:root[data-theme="dark"] .brand-logo {
+  box-sizing: content-box;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.65rem;
+  background: #fff;
+}
+.topbar-actions {
+  gap: 0.35rem;
+}
+.icon-btn {
+  transition:
+    background 0.2s var(--ease-glass),
+    transform 0.2s var(--ease-glass);
+}
+.icon-btn:active {
+  transform: scale(0.92);
+}
+
+/* The theme toggle: sun and moon trade places with a quarter turn. */
+.theme-icon {
+  display: grid;
+}
+.theme-icon > svg {
+  grid-area: 1 / 1;
+  transition:
+    transform 0.5s var(--ease-snap),
+    opacity 0.3s var(--ease-glass);
+}
+.theme-icon[data-shown="light"] > svg:last-child,
+.theme-icon[data-shown="dark"] > svg:first-child {
+  opacity: 0;
+  transform: rotate(-90deg) scale(0.5);
+}
+
+/* ---------- tracks with a sliding glass thumb ---------- */
+.tabs,
+.segmented,
+.toolbar select {
+  background: var(--fill);
+}
+.has-thumb {
+  position: relative;
+  isolation: isolate;
+}
+.has-thumb::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  top: 0.2rem;
+  bottom: 0.2rem;
+  left: 0;
+  width: var(--thumb-w, 0);
+  transform: translateX(var(--thumb-x, 0));
+  border-radius: var(--thumb-r, 0.55rem);
+  background: var(--thumb-bg);
+  box-shadow: var(--thumb-shadow);
+}
+.tabs.has-thumb {
+  --thumb-r: 999px;
+}
+.thumb-ready::before {
+  transition:
+    transform 0.5s var(--ease-snap),
+    width 0.5s var(--ease-snap);
+}
+.tabs.has-thumb > .tab[aria-selected="true"],
+.segmented.has-thumb > button[aria-pressed="true"] {
+  background: transparent;
+  box-shadow: none;
+}
+.tab,
+.segmented button {
+  transition: color 0.3s var(--ease-glass);
+}
+.tab:active,
+.segmented button:active {
+  transform: scale(0.96);
+}
+:root[data-theme="dark"] .tab[aria-selected="true"],
+:root[data-theme="dark"] .segmented button[aria-pressed="true"] {
+  color: #fff;
+}
+
+/* ---------- buttons ---------- */
+.btn {
+  transition:
+    background 0.2s var(--ease-glass),
+    transform 0.25s var(--ease-snap),
+    box-shadow 0.2s var(--ease-glass),
+    opacity 0.2s;
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+.btn-primary {
+  background-color: var(--accent-fill);
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0) 55%);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 6px 18px rgba(44, 103, 198, 0.3);
+}
+.btn-primary:hover:not(:disabled) {
+  background-color: var(--accent-fill-hover);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 8px 24px rgba(44, 103, 198, 0.38);
+}
+.btn-tinted {
+  background: color-mix(in srgb, var(--surface) 80%, #fff);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 1px 3px rgba(19, 49, 95, 0.1);
+}
+:root[data-theme="dark"] .btn-tinted {
+  background: rgba(255, 255, 255, 0.1);
+  color: #d5e3ff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+.btn-tinted:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface) 50%, #fff);
+}
+:root[data-theme="dark"] .btn-tinted:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.16);
+}
+.tile {
+  transition:
+    border-color 0.25s var(--ease-glass),
+    box-shadow 0.25s var(--ease-glass),
+    transform 0.3s var(--ease-snap),
+    background 0.25s var(--ease-glass);
+}
+.tile:active {
+  transform: scale(0.98);
+}
+
+/* ---------- inputs ---------- */
+:root[data-theme="dark"] :is(select.control, textarea.control, .auth-input) {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+:root[data-theme="dark"] :is(.toolbar select, select.control) option {
+  background: #121c33;
+}
+:root[data-theme="dark"] :is(.row-input, .auth-input input)::placeholder {
+  color: #8d9ab0;
+}
+.auth-input {
+  background: color-mix(in srgb, var(--surface) 70%, #fff);
+}
+
+/* ---------- live call ---------- */
+.call-head {
+  background: var(--call-glass);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  --rim-opacity: 0.55;
+}
+.bubble.bot {
+  background: color-mix(in srgb, var(--surface) 40%, #fff);
+  box-shadow: 0 1px 2px rgba(19, 49, 95, 0.06);
+}
+:root[data-theme="dark"] .bubble.bot {
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: none;
+}
+.bubble.customer {
+  background: var(--accent-fill);
+}
+:root[data-theme="dark"] .bubble .unspoken {
+  color: #8d9ab0;
+}
+.outcome {
+  animation: rise 0.5s var(--ease-glass) both;
+}
+.bubble {
+  animation: bubble-in 0.42s var(--ease-snap) both;
+}
+.bubble.bot {
+  transform-origin: bottom left;
+}
+.bubble.customer {
+  transform-origin: bottom right;
+}
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.4rem) scale(0.94);
+  }
+}
+
+/* The call dock floats as a glass capsule holding the one action and its caption. */
+.call-dock {
+  background: var(--glass-dock);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: var(--glass-dock-rim), var(--glass-float);
+  border-radius: 1.75rem;
+  --rim-opacity: 0.6;
+}
+@media (min-width: 641px) {
+  .call-dock {
+    width: min(28rem, 100%);
+    margin-inline: auto;
+    bottom: 1rem;
+    padding: 0.6rem 0.6rem 0.45rem;
+  }
+}
+
+/* ---------- sheet ---------- */
+.sheet {
+  background: var(--glass-sheet);
+  backdrop-filter: blur(36px) saturate(190%);
+  -webkit-backdrop-filter: blur(36px) saturate(190%);
+  animation: sheet-in 0.5s var(--ease-glass) both;
+}
+.sheet-head {
+  background: color-mix(in srgb, var(--glass-sheet) 60%, transparent);
+}
+.sheet-backdrop {
+  background: rgba(19, 33, 61, 0.2);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  animation: fade 0.3s var(--ease-glass) both;
+}
+:root[data-theme="dark"] .sheet-backdrop {
+  background: rgba(2, 6, 18, 0.5);
+}
+@keyframes sheet-in {
+  from {
+    transform: translateX(3rem);
+    opacity: 0;
+  }
+}
+
+/* ---------- alerts, pills, skeletons in dark ---------- */
+:root[data-theme="dark"] .alert.info {
+  color: #d5e3ff;
+}
+:root[data-theme="dark"] .skeleton {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.11) 50%, rgba(255, 255, 255, 0.05) 100%);
+  background-size: 200% 100%;
+}
+:root[data-theme="dark"] .mode-chip {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+
+/* ---------- sign in ---------- */
+.auth-panel {
+  background: transparent;
+  position: relative;
+}
+.auth-form-card {
+  padding: 2rem;
+  border-radius: 1.75rem;
+  background: var(--surface);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  box-shadow: 0 24px 60px rgba(19, 49, 95, 0.16);
+}
+:root[data-theme="dark"] .auth-form-card {
+  box-shadow: 0 24px 60px rgba(2, 6, 18, 0.5);
+}
+.auth-stage {
+  background: radial-gradient(130% 120% at 0% 0%, rgba(28, 63, 120, 0.94) 0%, rgba(19, 49, 95, 0.95) 55%, rgba(14, 37, 72, 0.97) 100%);
+}
+:root[data-theme="dark"] .auth-stage {
+  background: transparent;
+}
+.auth-preview {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+}
+.auth-theme {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+}
+
+/* ---------- phones ---------- */
+@media (max-width: 640px) {
+  .topbar {
+    padding: 0.5rem 0.5rem 0;
+  }
+  .topbar-inner {
+    gap: 0.4rem;
+    padding: 0.3rem 0.3rem 0.3rem 0.8rem;
+  }
+  .brand-logo {
+    height: 1.8rem;
+  }
+  .tab {
+    white-space: nowrap;
+    font-size: 0.85rem;
+  }
+  .tab svg {
+    display: none;
+  }
+  /* A segmented control wider than the screen scrolls sideways instead of overflowing. */
+  .segmented {
+    overflow-x: auto;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+  }
+  .segmented::-webkit-scrollbar {
+    display: none;
+  }
+  /* Docks float as glass capsules above the bottom edge. */
+  .call-dock,
+  .hangup-dock {
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: calc(0.75rem + env(safe-area-inset-bottom));
+    border-radius: 1.6rem;
+    border-top: 0;
+    padding: 0.6rem;
+    background: var(--glass-dock);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: var(--glass-dock-rim), var(--glass-float);
+  }
+  /* A backdrop filter would make the header the containing block for the fixed hang-up dock. */
+  .call-head {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .sheet {
+    animation-name: slide-up;
+  }
+}
+
+/* ---------- screen and theme transitions ---------- */
+::view-transition-old(root) {
+  animation: vt-out 0.2s var(--ease-glass) both;
+}
+::view-transition-new(root) {
+  animation: vt-in 0.42s var(--ease-glass) both;
+}
+@keyframes vt-out {
+  to {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+@keyframes vt-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.6rem) scale(1.01);
+  }
+}
+/* Theme switch: the new appearance grows in a circle from the toggle. */
+:root[data-vt="theme"] .topbar {
+  view-transition-name: none;
+}
+:root[data-vt="theme"]::view-transition-old(root) {
+  animation: none;
+}
+:root[data-vt="theme"]::view-transition-new(root) {
+  animation: theme-reveal 0.6s var(--ease-glass) both;
+}
+@keyframes theme-reveal {
+  from {
+    clip-path: circle(0 at var(--vt-x, 50%) var(--vt-y, 0));
+  }
+  to {
+    clip-path: circle(var(--vt-r, 150vmax) at var(--vt-x, 50%) var(--vt-y, 0));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before {
+    animation: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce) {
+  :is(.group, .tile, .panel, .outcome, .topbar-inner, .sheet, .auth-form-card, .call-dock, .hangup-dock) {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+  :root {
+    --surface: #ffffff;
+    --glass-bar: #ffffff;
+    --glass-dock: #ffffff;
+  }
+  :root[data-theme="dark"] {
+    --surface: #18223a;
+    --glass-bar: #18223a;
+    --glass-dock: #18223a;
+  }
+}

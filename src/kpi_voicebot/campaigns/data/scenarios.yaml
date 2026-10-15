@@ -1,0 +1,285 @@
+# Scripted customer replies for the text simulator. Each line is one customer turn:
+#   plain text          customer speaks after the bot finished
+#   [SILENCE]           customer says nothing
+#   [HANGUP]            customer hangs up
+#   [INTERRUPT:n] text  customer cuts in after the bot's first n segments were played
+# `expect` is checked by the test suite and shown in the operator UI.
+scenarios:
+  - id: pa_happy
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "ยืนยันครบทุกข้อ"
+    customer:
+      - "ใช่ค่ะ"
+      - "ได้ค่ะ"
+      - "ค่ะ"
+      - "ถูกต้องค่ะ"
+      - "ถูกค่ะ"
+      - "ใช่ค่ะ"
+      - "ใช่ค่ะ ถูกต้อง"
+      - "ถูกต้องค่ะ"
+      - "ใช่ค่ะ"
+      - "ถูกต้องค่ะ"
+      - "ใช่ค่ะ"
+      - "ถูกต้องค่ะ"
+      - "ค่ะ"
+      - "ไม่มีค่ะ"
+    expect:
+      outcome: policy_confirmed
+      fields: {plan_name: confirmed, beneficiary: confirmed, delivery_target: confirmed}
+      free_look: full
+  - id: pa_discrepancy
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "แจ้งข้อมูลผู้รับผลประโยชน์และอีเมลไม่ตรง"
+    customer:
+      - "ใช่ค่ะ"
+      - "สะดวกค่ะ"
+      - "ค่ะ"
+      - "ถูกต้องค่ะ"
+      - "ถูกค่ะ"
+      - "ถูกต้อง"
+      - "ใช่ค่ะ"
+      - "ถูกค่ะ"
+      - "ไม่ใช่ค่ะ ผู้รับผลประโยชน์ต้องเป็นสามี"
+      - "ใช่ค่ะ"
+      - "ใช่ค่ะ"
+      - "ไม่ถูกค่ะ"
+      - "อีเมลเปลี่ยนเป็น somchai.new@example.com แล้วค่ะ"
+      - "ค่ะ"
+      - "ค่ะ"
+      - "ไม่มีค่ะ"
+    expect:
+      outcome: confirmed_with_discrepancy
+      fields: {beneficiary: disputed, delivery_target: disputed, delivery_channel: confirmed, payment: confirmed}
+      tasks: [policy_discrepancy]
+  - id: pa_wrong_person
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "ผิดคน (ห้ามเปิดเผยข้อมูลกรมธรรม์)"
+    customer: ["ไม่ใช่ค่ะ คุณโทรผิดแล้ว"]
+    expect: {outcome: wrong_person, no_disclosure: true}
+  - id: pa_ai_question_then_identity
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "ถามว่าใครโทรมา ก่อนยืนยันตัวตน"
+    customer: ["ใครโทรมาคะ", "ใช่ค่ะ ดิฉันเอง", "ไม่สะดวกค่ะ", "[SILENCE]"]
+    expect: {outcome: callback_requested, no_disclosure: true}
+  - id: pa_callback
+    campaign: pa_confirmation
+    profile: pa-post
+    label: "ไม่สะดวก ขอให้โทรกลับพรุ่งนี้"
+    customer: ["ใช่ครับ", "ไม่สะดวกครับ ขับรถอยู่", "พรุ่งนี้บ่ายสองโมงครับ"]
+    expect: {outcome: callback_requested, callback_time: "พรุ่งนี้บ่ายสองโมง", tasks: [callback]}
+  - id: pa_faq
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "ถามคำถามก่อนวางสาย (มีและไม่มีคำตอบที่อนุมัติ)"
+    customer:
+      - "ใช่ค่ะ"
+      - "ได้ค่ะ"
+      - "ค่ะ"
+      - "ถูกต้องค่ะ"
+      - "ถูกค่ะ"
+      - "ใช่ค่ะ"
+      - "ใช่ค่ะ ถูกต้อง"
+      - "ถูกต้องค่ะ"
+      - "ใช่ค่ะ"
+      - "ถูกต้องค่ะ"
+      - "ใช่ค่ะ"
+      - "ถูกต้องค่ะ"
+      - "ค่ะ"
+      - "ขี่มอเตอร์ไซค์คุ้มครองไหมคะ"
+      - "แล้วมีเงินปันผลคืนไหมคะ"
+      - "ไม่มีแล้วค่ะ"
+    expect: {outcome: policy_confirmed, tasks: [question_follow_up]}
+  - id: pa_interrupt
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "พูดแทรกระหว่างทวนข้อมูล แล้วให้พูดต่อ"
+    customer:
+      - "ใช่ค่ะ"
+      - "ได้ค่ะ"
+      - "ค่ะ"
+      - "[INTERRUPT:1] ค่ะ"
+      - "ถูกต้องค่ะ"
+      - "ถูกค่ะ"
+      - "ใช่ค่ะ"
+      - "ใช่ค่ะ ถูกต้อง"
+      - "ถูกต้องค่ะ"
+      - "ใช่ค่ะ"
+      - "ถูกต้องค่ะ"
+      - "ใช่ค่ะ"
+      - "ถูกต้องค่ะ"
+      - "อืม"
+      - "ไม่มีค่ะ"
+    expect:
+      outcome: policy_confirmed
+      fields: {death_benefit: confirmed}
+      delivery: {plan_name: full, death_benefit: resumed_after_interruption}
+      free_look: full
+  - id: pa_human_session
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "ตอบแบบคนจริง: ไม่แน่ใจ ขอฟังอีกที แสลง มีคำถาม"
+    customer:
+      - "พูดอยู่ครับ"
+      - "คิดว่าน่าจะสะดวกครับ"
+      - "ครับผม"
+      - "ครับ"
+      - "น่าจะใช่นะครับ"
+      - "ใช่ครับ ถูกต้อง"
+      - "ถูกครับ"
+      - "มั้งครับ"
+      - "ไม่แน่ใจครับ"
+      - "ใช่ครับ"
+      - "ใช่ครับ ลูกสาวผมเอง"
+      - "ขอเช็คสักครู่นะครับ"
+      - "ครับ จ่ายแล้ว"
+      - "ใช่ครับ"
+      - "ขออีกทีครับ"
+      - "ถั่วต้ม"
+      - "เค"
+      - "มีครับ"
+      - "มีครับผม อยากสอบถามเพิ่มเติมครับ"
+      - "เคลมต้องทำยังไงครับ"
+      - "ไม่มีแล้วครับ"
+    expect:
+      outcome: policy_confirmed
+      fields: {medical_per_accident: confirmed, premium: unclear, delivery_target: confirmed}
+      tasks: [unclear_answer]
+      no_tasks: [question_follow_up]
+      directives: [hedge_recheck, "review:delivery_target:repeat", invite_question, invite_question_again]
+      says: ["ดิฉันจดไว้ให้เจ้าหน้าที่ตรวจสอบอีกที", "ขอทวนอีกครั้งนะคะ อีเมล"]
+  - id: pa_objection
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "ไม่ยินยอมให้บันทึกการสนทนา"
+    customer: ["ใช่ค่ะ", "ได้ค่ะ", "ไม่อยากให้บันทึกค่ะ"]
+    expect: {outcome: notice_objection}
+  - id: pa_silence
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "เงียบไม่ตอบ"
+    customer: ["ใช่ค่ะ", "[SILENCE]", "[SILENCE]", "[SILENCE]"]
+    expect: {outcome: no_response}
+  - id: pa_hangup
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "วางสายระหว่างทวนข้อมูล"
+    customer: ["ใช่ค่ะ", "ได้ค่ะ", "ค่ะ", "ถูกต้องค่ะ", "[HANGUP]"]
+    expect: {outcome: policy_partial, fields: {plan_name: confirmed, premium: not_reviewed}}
+  - id: pa_refuse
+    campaign: pa_confirmation
+    profile: pa-email
+    label: "ปฏิเสธ ไม่สนใจ"
+    customer: ["ใช่ค่ะ", "ไม่สนใจค่ะ"]
+    expect: {outcome: refused}
+  - id: pa_do_not_call
+    campaign: pa_confirmation
+    profile: pa-post
+    label: "ขอไม่ให้โทรมาอีก"
+    customer: ["ใช่ครับ", "ไม่ต้องโทรมาอีกนะครับ"]
+    expect: {outcome: do_not_call}
+
+  - id: survey_happy
+    campaign: accident_survey
+    profile: survey-surveyor
+    label: "ตอบครบ คะแนนดี"
+    customer: ["ใช่ครับ", "ได้ครับ", "ครับ", "5", "ห้าครับ", "สี่ครับ", "5 ครับ", "10", "ไม่มีครับ"]
+    expect:
+      outcome: survey_completed
+      answers: {q1: [answered, 5], q2: [answered, 5], q3: [answered, 4], q4: [answered, 5], q5: [answered, 10]}
+  - id: survey_contextual
+    campaign: accident_survey
+    profile: survey-surveyor
+    label: "ตอบแบบพูดธรรมชาติ คะแนนต่ำ พร้อมข้อเสนอแนะ"
+    customer:
+      - "ใช่ค่ะ"
+      - "ได้ค่ะ"
+      - "ค่ะ"
+      - "เอ่อ สี่มั้งคะ"
+      - "ก็โอเคนะ แต่รอสายนานมาก"
+      - "สามค่ะ"
+      - "สองค่ะ"
+      - "พนักงานมาช้ามาก รอเกือบชั่วโมง"
+      - "ให้เต็มเลยค่ะ"
+      - "แปดค่ะ"
+      - "อยากให้ติดตามเรื่องเคลมเร็วกว่านี้"
+      - "พนักงานรับแจ้งพูดจาไม่สุภาพ อยากร้องเรียนค่ะ"
+    expect:
+      outcome: survey_completed
+      answers: {q1: [answered, 4], q2: [answered, 3], q3: [answered, 2], q4: [answered, 5], q5: [answered, 8]}
+      feedback: {q2: "ก็โอเคนะ แต่รอสายนานมาก", q3: "พนักงานมาช้ามาก รอเกือบชั่วโมง"}
+      tasks: [complaint]
+  - id: survey_correction
+    campaign: accident_survey
+    profile: survey-surveyor
+    label: "เปลี่ยนคะแนนระหว่างทาง"
+    customer:
+      - "ใช่ค่ะ"
+      - "ได้ค่ะ"
+      - "ค่ะ"
+      - "สามค่ะ"
+      - "เอ้ย ขอเปลี่ยนเป็นห้าค่ะ"
+      - "ข้อแรกขอเป็นสี่ดีกว่าค่ะ"
+      - "สี่ค่ะ"
+      - "ห้า"
+      - "ห้า"
+      - "เก้า"
+      - "ไม่มีค่ะ"
+    expect:
+      outcome: survey_completed
+      answers: {q1: [answered, 4], q2: [answered, 4]}
+      changed_from: {q1: [3, 5]}
+  - id: survey_ranges
+    campaign: accident_survey
+    profile: survey-surveyor
+    label: "คะแนนเกินช่วง และตอบไม่ชัด"
+    customer: ["ใช่ค่ะ", "ได้ค่ะ", "ค่ะ", "เจ็ดค่ะ", "สี่หรือห้าดี", "ห้า", "5", "5", "5", "10", "ไม่มี"]
+    expect: {outcome: survey_completed, answers: {q1: [answered, 5]}}
+  - id: survey_na_by_customer
+    campaign: accident_survey
+    profile: survey-surveyor
+    label: "ลูกค้าแจ้งว่าไม่มีพนักงานสำรวจภัยไป"
+    customer: ["ใช่ค่ะ", "ได้ค่ะ", "ค่ะ", "5", "5", "ไม่มีพนักงานมาเลยค่ะ เคลียร์กันเอง", "9", "ไม่มีค่ะ"]
+    expect: {outcome: survey_completed, answers: {q3: [not_applicable, null], q4: [not_applicable, null], q5: [answered, 9]}}
+  - id: survey_no_surveyor_profile
+    campaign: accident_survey
+    profile: survey-no-surveyor
+    label: "ข้อมูลเคสระบุว่าไม่มีพนักงานสำรวจภัย"
+    customer: ["ใช่ค่ะ", "ได้ค่ะ", "ค่ะ", "5", "4", "10", "ไม่มีค่ะ"]
+    expect: {outcome: survey_completed, answers: {q3: [not_applicable, null], q4: [not_applicable, null]}}
+  - id: survey_unknown_surveyor
+    campaign: accident_survey
+    profile: survey-unknown
+    label: "ถามก่อนว่ามีพนักงานสำรวจภัยไปไหม"
+    customer: ["ใช่ค่ะ", "ได้ค่ะ", "ค่ะ", "5", "5", "ไม่มีค่ะ", "0", "ไม่ค่อยประทับใจเรื่องการติดตามงาน", "ไม่มีแล้วค่ะ"]
+    expect:
+      outcome: survey_completed
+      answers: {q3: [not_applicable, null], q5: [answered, 0]}
+      feedback: {q5: "ไม่ค่อยประทับใจเรื่องการติดตามงาน"}
+  - id: survey_both_and_skip
+    campaign: accident_survey
+    profile: survey-surveyor
+    label: "ให้คะแนนสองข้อพร้อมกัน และขอข้ามหนึ่งข้อ"
+    customer: ["ใช่ค่ะ", "ได้ค่ะ", "ค่ะ", "ห้าทั้งสองข้อเลยค่ะ", "สี่", "ขอไม่ตอบข้อนี้ค่ะ", "10", "ไม่มี"]
+    expect: {outcome: survey_completed, answers: {q2: [answered, 5], q4: [skipped, null]}}
+  - id: survey_partial
+    campaign: accident_survey
+    profile: survey-surveyor
+    label: "วางสายกลางแบบสอบถาม"
+    customer: ["ใช่ค่ะ", "ได้ค่ะ", "ค่ะ", "5", "4", "[HANGUP]"]
+    expect: {outcome: survey_partial, answers: {q1: [answered, 5], q2: [answered, 4], q3: [unanswered, null], q5: [not_asked, null]}}
+  - id: survey_callback_midway
+    campaign: accident_survey
+    profile: survey-surveyor
+    label: "ขอให้โทรกลับระหว่างทำแบบสอบถาม"
+    customer: ["ใช่ค่ะ", "ได้ค่ะ", "ค่ะ", "5", "ขอโทษค่ะ ไม่สะดวกแล้ว ค่อยโทรมาใหม่ตอนเย็นนะคะ"]
+    expect: {outcome: callback_requested, callback_time: "เย็น", answers: {q1: [answered, 5]}}
+  - id: survey_safety_comment
+    campaign: accident_survey
+    profile: survey-no-surveyor
+    label: "ความคิดเห็นเกี่ยวกับผู้บาดเจ็บ (ต้องส่งต่อเจ้าหน้าที่)"
+    customer: ["ใช่ค่ะ", "ได้ค่ะ", "ค่ะ", "4", "4", "7", "ไม่มีค่ะ", "ตอนนั้นมีคนบาดเจ็บ ยังรอเคลมค่าโรงพยาบาลอยู่เลย"]
+    expect: {outcome: survey_completed, tasks: [safety]}

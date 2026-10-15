@@ -1,0 +1,28 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mongo",
+      "runtimeExecutable": "mongod",
+      "runtimeArgs": ["--dbpath", ".local/mongo", "--bind_ip", "127.0.0.1", "--port", "27018", "--quiet"],
+      "port": 27018
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "kpi-api"],
+      "port": 8000
+    },
+    {
+      "name": "worker",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "kpi-worker"]
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "apps/web", "dev"],
+      "port": 5173
+    }
+  ]
+}

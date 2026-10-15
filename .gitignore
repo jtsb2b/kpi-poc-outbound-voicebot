@@ -1,0 +1,24 @@
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/
+
+# local environment and secrets
+.env
+.env.*
+!.env.example
+
+# python / node / build output
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+apps/web/dist/
+
+# project-local runtime data (native MongoDB, logs)
+.local/
+*.tsbuildinfo
+
+# design tool working state (screenshots, local config)
+.impeccable/
