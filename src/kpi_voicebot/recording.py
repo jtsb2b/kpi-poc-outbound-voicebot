@@ -10,8 +10,10 @@ import datetime as dt
 import hashlib
 import hmac
 import logging
+import re
 from dataclasses import dataclass
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 import httpx
 from livekit import api
@@ -27,8 +29,22 @@ class Recording:
     key: str  # object key in the COS bucket
 
 
-def object_key(settings: Settings, call_id: str) -> str:
-    return f"{settings.cos_prefix.rstrip('/')}/{call_id}.ogg"
+def object_key(
+    settings: Settings, call_id: str, customer_name: str = "", campaign: str = "", now: dt.datetime | None = None
+) -> str:
+    """One folder per day, one file per call, findable by the customer's name:
+    `kpi-voicebot/recordings/19-10-2026/สมชาย_ใจดี_pa_confirmation_141530_dfd63211.ogg`
+    (the Bangkok date and time the call was placed; the call id keeps two calls apart)."""
+    local = (now or dt.datetime.now(dt.UTC)).astimezone(ZoneInfo(settings.timezone))
+    parts = [_safe(customer_name), _safe(campaign), local.strftime("%H%M%S"), _safe(call_id)[:8]]
+    name = "_".join(p for p in parts if p)
+    return f"{settings.cos_prefix.rstrip('/')}/{local.strftime('%d-%m-%Y')}/{name}.ogg"
+
+
+def _safe(text: str) -> str:
+    """Letters (Thai included) and digits only, words joined by "_": no "/" can make a folder."""
+    # Thai vowel and tone marks are not \w to Python: the Thai block is listed so "ใจดี" keeps its ี.
+    return "_".join(re.findall(r"(?:[^\W_]|[\u0e00-\u0e7f])+", text))
 
 
 def cos_endpoint(settings: Settings) -> str:
