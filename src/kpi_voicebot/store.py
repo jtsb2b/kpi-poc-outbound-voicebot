@@ -168,6 +168,14 @@ class Store:
             update["answered_at"] = now
         await self.calls.update_one({"_id": call_id, "active_lock": ACTIVE_LOCK}, {"$set": update})
 
+    async def asked_not_to_call(self, e164: str, days: int = 180) -> bool:
+        """The customer at this number asked not to be called again, within the last `days`."""
+        since = utcnow() - timedelta(days=days)
+        found = await self.calls.find_one(
+            {"phone.e164": e164, "outcome": Outcome.DO_NOT_CALL.value, "ended_at": {"$gte": since}}, {"_id": 1}
+        )
+        return found is not None
+
     async def set_recording(self, call_id: str, recording: dict[str, Any]) -> None:
         await self.calls.update_one({"_id": call_id}, {"$set": {"recording": recording, "updated_at": utcnow()}})
 

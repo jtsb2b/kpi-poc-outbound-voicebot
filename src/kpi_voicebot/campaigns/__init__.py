@@ -30,6 +30,8 @@ class Wording(BaseModel):
     segments: list[SegmentSpec]
     # Legal or approved disclosure: spoken exactly as written, never rephrased by the model.
     verbatim: bool = False
+    # Other approved ways to say a one-line wording, rotated so the bot never repeats itself.
+    alternatives: list[str] = []
 
     @model_validator(mode="before")
     @classmethod
@@ -86,6 +88,15 @@ class IdentityConfig(BaseModel):
     second_factor: Literal["birth_day_month"] | None = None
 
 
+class ReviewGroup(BaseModel):
+    """Policy items read together in one turn and confirmed with one question."""
+
+    id: str
+    short: str
+    units: list[str]
+    confirm: str = ""  # the group's check question; empty uses the last unit's own confirm question
+
+
 class Campaign(BaseModel):
     id: CampaignId
     title: str
@@ -98,6 +109,7 @@ class Campaign(BaseModel):
     acknowledgements: list[str] = Field(min_length=1)
     feedback_acknowledgements: list[str] = []
     review_units: list[ReviewUnit] = []
+    review_groups: list[ReviewGroup] = []
     policy_fields: list[PolicyFieldSpec] = []
     questions: list[QuestionSpec] = []
     faq: list[FaqEntry] = []

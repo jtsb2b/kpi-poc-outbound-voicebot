@@ -115,7 +115,7 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
             "caller_id": settings.public_caller_id,
             "interpreter": settings.interpreter,
             "within_calling_hours": within_calling_hours(settings),
-            "calling_hours": f"{settings.calling_start_hour:02d}:00-{settings.calling_end_hour:02d}:00",
+            "calling_hours": settings.calling_window,
             "timezone": settings.timezone,
             "retention_days": settings.retention_days,
             "active_call_id": active["_id"] if active else None,

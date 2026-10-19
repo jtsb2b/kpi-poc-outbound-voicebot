@@ -103,6 +103,8 @@ class CallEnd:
     sip_reason: str | None = None
     timings: list[float] = field(default_factory=list)
     recording_key: str | None = None  # where the call's audio was uploaded (Tencent COS)
+    recording_declined: bool = False  # the customer declined: audio deleted, transcript kept
+    recording_delete_failed: bool = False
 
 
 class RoomOut:
@@ -185,6 +187,10 @@ class PhoneCall:
         self.sip_call_to = sip_call_to
         self.recording_key = recording_key
         self.recording: Recording | None = None
+        self._lk: api.LiveKitAPI | None = None
+        self._end: CallEnd | None = None
+        if hasattr(engine, "on_recording_declined"):
+            engine.on_recording_declined = self._discard_recording
         self.sink = sink
         self.console = console
         self.is_canceled = is_canceled
@@ -258,16 +264,19 @@ class PhoneCall:
             await self.room.local_participant.publish_track(
                 track, rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
             )
+            opening = getattr(self.dialogue, "prepare_opening", None)
             await asyncio.gather(
                 asr.open(context=asr_context(self.engine)),
                 player.prepare(),
                 front.start(delay_ms=LINE_DELAY_MS),
+                *([opening()] if opening else []),  # the model's greeting, before the phone rings
             )
             end = await self._dial(lk)
             if not end.answered:
                 return end
             if self.on_answered is not None:
                 await self.on_answered()
+            self._lk, self._end = lk, end
             await self._start_recording(lk, end)
             return await self._converse(end, front, player, asr)
         finally:
@@ -383,6 +392,26 @@ class PhoneCall:
         finally:
             await stream.aclose()
 
+    async def _discard_recording(self) -> None:
+        """The customer declined the recording: stop it now and delete the file; the call goes on."""
+        end, rec = self._end, self.recording
+        if end is not None:
+            end.recording_declined = True
+        if rec is None or self._lk is None:
+            return
+        self.recording = None
+        await recording.stop(self._lk, rec)
+        try:
+            await recording.delete(self.settings, rec.key)
+        except Exception:
+            log.exception("could not delete the declined recording %s", rec.key)
+            if end is not None:
+                end.recording_delete_failed = True
+            return
+        if end is not None:
+            end.recording_key = None
+        self._note("ลูกค้าไม่ยินยอมให้บันทึกเสียง: หยุดบันทึกและลบไฟล์เสียงแล้ว (ยังบันทึกข้อความ)")
+
     async def _start_recording(self, lk: api.LiveKitAPI, end: CallEnd) -> None:
         """Record from the answer on. A recording that fails to start never stops the call."""
         if not self.recording_key or not self.settings.recording_enabled:
@@ -445,7 +474,7 @@ def main() -> None:
     if missing := settings.livekit_missing():
         sys.exit(f"not configured: {', '.join(missing)}")
     if not within_calling_hours(settings):
-        sys.exit(f"outside calling hours ({settings.calling_start_hour:02d}:00–{settings.calling_end_hour:02d}:00)")
+        sys.exit(f"outside calling hours ({settings.calling_window})")
     profile = get_profile(args.profile)
     if profile is None:
         sys.exit(f"unknown profile {args.profile}")
@@ -466,6 +495,12 @@ def main() -> None:
 
     async def place(interpreter: AsyncInterpreter | None, responder: Responder | None) -> None:
         from kpi_voicebot.agent import make_dialogue
+        from kpi_voicebot.llm import check_llm
+
+        problem = await check_llm(responder.client) if responder is not None else None
+        if problem:
+            print(f"\033[31m   · LLM ใช้งานไม่ได้ ({problem}): ไม่โทรออก\033[0m")
+            return
 
         talk, dialogue = make_dialogue(engine, interpreter, responder, settings.conversation_mode)
         call = PhoneCall(
@@ -474,7 +509,7 @@ def main() -> None:
             dialogue,
             room_name=room,
             sip_call_to=sip_call_to,
-            recording_key=recording.object_key(settings, room),
+            recording_key=recording.object_key(settings, room, args.name, profile.campaign.value),
             console=True,
         )
         end = await call.run()

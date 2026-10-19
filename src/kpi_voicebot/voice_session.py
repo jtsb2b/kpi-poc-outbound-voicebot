@@ -42,6 +42,7 @@ ECHO_TAIL = 0.35  # half duplex: keep the mic muted this long after the bot stop
 SPOKEN_CHARS_PER_SECOND = 13.0  # JAI TTS pace, to map heard time onto segments
 BARGE_IN_SPEECH = 0.7  # seconds of sustained speech that count as cutting in (a "ครับ" is shorter)
 ANSWER_SETTLE = 0.3  # phone: let the media path open after the answer, then greet straight away
+MAX_RETHINK = 3  # replies started again because the customer was still talking
 PICKUP_WINDOW = 1.2  # a hello committed this soon after the greeting was said over it
 _HELLO = re.compile(r"ฮัลโหล|ฮัลโล|ฮัลโหลว|สวัสดี|ครับผม|ครับ|ค่ะ|คะ|จ้ะ|จ้า|ว่าไง|ใครพูด|ใครคะ|ใครครับ|[\s,.!?…]")
 
@@ -255,6 +256,28 @@ class VoiceSession:
                 turn.cancel()
         return None if self.gone.is_set() or turn.cancelled() else turn.result()
 
+    async def _reply(self, turn: str) -> Directive:
+        """The reply to this turn. If the customer carries on while it is worked out ("ก็ครับ… เอ่อ ไม่ครับ"),
+        it answers only the first half: start again from the same point with all of it (19 Oct call,
+        where "ไม่ครับ" to the recording waited 34 s and was then taken as an answer to the next question)."""
+        dialogue = self.dialogue
+        snapshot = getattr(dialogue, "snapshot", None)  # the LLM-led agent; the scripted engine has none
+        restore = getattr(dialogue, "restore", None)
+        for _ in range(MAX_RETHINK):
+            before = snapshot() if snapshot is not None and restore is not None else None
+            directive = await dialogue.reply(turn)
+            if before is None or restore is None or not self.collector.heard:
+                return directive
+            more = await self._next_turn()
+            if not more or self.gone.is_set():
+                return directive
+            self._note(f"(ลูกค้าพูดต่อระหว่างคิดคำตอบ: {more} — คิดใหม่ทั้งประโยค)")
+            if self.sink is not None:
+                await self.sink.customer(more)
+            restore(before)
+            turn = f"{turn} {more}"
+        return directive
+
     async def _loop(self) -> None:
         engine, dialogue = self.engine, self.dialogue
         directive = dialogue.start()
@@ -309,7 +332,7 @@ class VoiceSession:
                 print(f"\033[32m👤 ลูกค้า:\033[0m {turn}")
             if self.sink is not None:
                 await self.sink.customer(turn)
-            directive = await dialogue.reply(turn)
+            directive = await self._reply(turn)
             ready = time.monotonic() - stopped
             self.turn_timings.append(ready)
             for kind, data in dialogue.events:

@@ -217,3 +217,22 @@ class LLMClient:
         if usage.get("total_tokens"):
             self.limiter.record_actual(int(usage["total_tokens"]))
         return parsed, {"latency_ms": latency_ms, "total_tokens": usage.get("total_tokens")}
+
+
+def llm_client(settings: Settings) -> Any:
+    """The LLM named by LLM_PROVIDER: Gemini, or the self-hosted model on the JTS gateway."""
+    if settings.llm_provider == "gemini":
+        from kpi_voicebot.gemini import GeminiClient
+
+        return GeminiClient(settings)
+    return LLMClient(settings)
+
+
+async def check_llm(client: Any) -> str | None:
+    """Before dialling: does the LLM answer at all? None when it does, else the reason it does not.
+    A call whose every turn falls back to fixed lines is worse than no call (19 Oct test call)."""
+    try:
+        await client.chat_text([{"role": "user", "content": "ตอบคำเดียวว่า พร้อม"}], max_tokens=10)
+    except LLMError as exc:
+        return str(exc)
+    return None
