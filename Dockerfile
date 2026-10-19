@@ -15,7 +15,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 COPY src ./src
 RUN uv sync --frozen --no-dev
 
-RUN useradd --system --uid 10001 --create-home app && mkdir -p /data && chown app /data
+# Mount points exist in the image, owned by the app user: Docker gives a fresh named volume the
+# ownership of the directory it is mounted on (a missing one would be owned by root, unwritable).
+RUN useradd --system --uid 10001 --create-home app && mkdir -p /data/tts_cache && chown -R app /data
 USER app
 
 CMD ["kpi-api"]

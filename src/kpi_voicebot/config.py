@@ -18,8 +18,10 @@ class Settings(BaseSettings):
 
     retention_days: int = Field(default=30, ge=1)
     live_calls_enabled: bool = False
-    calling_start_hour: int = Field(default=8, ge=0, le=23)
-    calling_end_hour: int = Field(default=20, ge=1, le=24)
+    # OIC (คปภ.) guideline for non-life sales calls: Monday to Saturday, 08:30-19:00 local time.
+    calling_start: str = Field(default="08:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    calling_end: str = Field(default="19:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$|^24:00$")
+    calling_days: list[int] = [0, 1, 2, 3, 4, 5]  # Monday = 0
     timezone: str = "Asia/Bangkok"
     allow_internal_extensions: bool = False
 
@@ -29,6 +31,11 @@ class Settings(BaseSettings):
 
     # Reply understanding: "rules" (deterministic only) or "llm" (self-hosted OpenThai 2.0 + rule safety layer)
     interpreter: Literal["rules", "llm"] = "rules"
+    # Which LLM, chosen explicitly (never a silent fallback): Gemini (default since 19 Oct 2026, for Thai
+    # politeness) or the self-hosted model on the JTS gateway (LLM_BASE_URL / LLM_MODEL).
+    llm_provider: Literal["gemini", "jts"] = "gemini"
+    gemini_llm_model: str = "gemini-3.5-flash-lite"
+    gemini_thinking_level: Literal["minimal", "low", "medium", "high"] = "minimal"
     # With the LLM: "agent" = it leads the conversation from the approved knowledge (checklist and
     # rules kept by code); "scripted" = the engine's approved lines, reworded by the LLM.
     conversation_mode: Literal["agent", "scripted"] = "agent"
@@ -56,8 +63,8 @@ class Settings(BaseSettings):
     jaiasr_http_url: str = "https://api.jasgpu.com/v1/audio/transcriptions"
     asr_chunk_seconds: float = Field(default=0.5, ge=0.25, le=10)
 
-    # Voice: JAI TTS (JTS) by default; Gemini Live only when chosen explicitly, never as a fallback
-    tts_provider: Literal["jai", "gemini"] = "jai"
+    # Voice, chosen explicitly (never a fallback): Gemini 3.8 Flash-Lite TTS (the PM's choice, 19 Oct 2026) or JAI TTS
+    tts_provider: Literal["jai", "gemini"] = "gemini"
     jaitts_base_url: str = "https://jai-tts.bai-ap.jts.co.th:10206"
     jaitts_api_key: SecretStr | None = None
     jaitts_cfg: float = Field(default=2.0, ge=0)
@@ -65,13 +72,16 @@ class Settings(BaseSettings):
 
     # Optional Gemini Live voice on the user's Google key (≈0.5 s first audio)
     google_api_key: SecretStr | None = None
-    tts_model: str = "gemini-3.8-live"
-    tts_voice: str = "Sulafat"
+    # gemini-3.8-flash-lite-tts acts on audio tags (<short pause>); a "-live" model is read with Gemini Live.
+    tts_model: str = "gemini-3.8-flash-lite-tts"
+    # Achernar: Google's softest female voice, "soft, calm, soothing, higher pitch" (measured 238 Hz, the
+    # highest of the six auditioned on 19 Oct 2026; all six read Thai word for word).
+    tts_voice: str = "Achernar"
     # Short and constant: a long or changing style prompt makes the delivery drift.
     tts_style: str = (
-        "a warm, polite Thai woman who is an experienced call-centre agent; speaks at a brisk, everyday "
-        "conversational speed like a real Bangkok call-centre agent, not slow and not over-enunciated; "
-        "steady, even tone from start to finish"
+        "a sweet, soft-spoken young Thai woman, an experienced and caring call-centre agent who smiles as "
+        "she talks; gentle and polite, never flat or robotic; natural everyday conversational speed like a "
+        "real Bangkok call-centre agent, not slow and not over-enunciated; steady tone from start to finish"
     )
     tts_cache_dir: str = ".local/tts_cache"
 
@@ -97,6 +107,11 @@ class Settings(BaseSettings):
     cos_region: str | None = None  # e.g. ap-bangkok
     cos_bucket: str | None = None  # name-appid
     cos_prefix: str = "kpi-voicebot/recordings/"
+
+    @property
+    def calling_window(self) -> str:
+        days = "จันทร์–เสาร์" if self.calling_days == [0, 1, 2, 3, 4, 5] else "วันที่กำหนด"
+        return f"{days} {self.calling_start}–{self.calling_end} น."
 
     @property
     def recording_enabled(self) -> bool:

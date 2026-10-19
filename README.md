@@ -15,8 +15,9 @@ Outbound Thai voicebot POC for KPI (กรุงไทยพานิชปร�
 | FastAPI + Swagger (`/docs`), Excel import/export | done |
 | Operator UI (React/Vite) | done |
 | Text simulator (UI scenarios, `kpi-sim` CLI) | done |
-| LLM (self-hosted OpenThai 2.0 27B on the JTS gateway since 15 Oct 2026, previously Qwen 3.8 Flash; `INTERPRETER=llm`) | done: leads the conversation from the knowledge base (agent mode); approved wording on any error |
-| Voice: JAI TTS (JTS, ≈0.12 s to first audio, clause-streamed PCM), Thai normaliser; Gemini Live only as an explicit option | done |
+| LLM: Gemini 3.5 Flash-Lite (`LLM_PROVIDER=gemini`, the default since 19 Oct 2026, chosen by the PM for Thai politeness); OpenThai 2.0 on the JTS gateway stays selectable (`LLM_PROVIDER=jts`) | done: leads the conversation from the knowledge base (agent mode); about 1.2–1.6 s per reply measured from Bangkok; approved wording on any error |
+| Thai phone politeness and grouped policy reading (research of 19 Oct 2026, `research_notes/Thai politeness and Gemini for voicebot/`) | done: softened questions, polite silence ladder, varied lines; policy read in four topic groups with one confirmation each; recording consent asked, a "no" deletes the audio and keeps the transcript; OIC calling hours (Mon–Sat 08:30–19:00) and a 6-month do-not-call block |
+| Voice: Gemini 3.8 Flash-Lite TTS with audio tags, voice Achernar (PM, 19 Oct 2026), Thai normaliser; JAI TTS selectable | done |
 | Speech recognition: Soniox real-time `stt-rt-v5` (`ASR_PROVIDER=soniox`, the default since 15 Oct 2026); JaiASR-Flash stays selectable (`ASR_PROVIDER=jai`) while it is in maintenance | done: turn-taking (`TurnCollector`), Silero VAD, ai-coustics noise reduction on calls, microphone test mode |
 | Approved knowledge base for the LLM (`campaigns/knowledge/*.th.md`, built from the approved scripts and FAQ) | done: fixed prompt prefix (cached by the gateway), guarded so its facts can be used but not stretched |
 | LLM-led conversation (`agent.py`, `CONVERSATION_MODE=agent`, default with `INTERPRETER=llm`) | done: the model talks freely from the knowledge base against a checklist; code keeps the disclosures word for word, the facts exact, the results and the close; `scripted` keeps the old reworded-script mode |
@@ -40,7 +41,7 @@ src/kpi_voicebot/
   service.py        call request validation
   worker.py         claims one call at a time and runs it (simulated or live)
   simulator.py      scripted/typed customer replies (kpi-sim)
-  voice_session.py  the spoken conversation loop: front end → Soniox (or JaiASR) → dialogue → JAI TTS, barge-in, hang-up
+  voice_session.py  the spoken conversation loop: front end → Soniox (or JaiASR) → dialogue → Gemini TTS (or JAI TTS), barge-in, hang-up
   playback.py       streams TTS to the speakers or a LiveKit track; read-ahead of the prepared turn
   telephony.py      LiveKit room + SIP dial (once, never redialled), ringing/hang-up, kpi-call CLI
   mic.py            the same loop on this computer's microphone (kpi-sim chat --mic)
@@ -106,14 +107,20 @@ uv run kpi-sim chat pa-email
 
 In chat mode you type as the customer. Commands: `/silence`, `/hangup`, and `/interrupt <n> <text>` (the bot is cut off after `n` segments).
 
-### The LLM conversation (OpenThai 2.0)
+### The LLM conversation (Gemini 3.5 Flash-Lite)
 
-With `INTERPRETER=llm` and the `LLM_*` values in `.env`, the self-hosted LLM leads the call
+With `INTERPRETER=llm`, the LLM named by `LLM_PROVIDER` leads the call: Gemini 3.5 Flash-Lite by default
+(`gemini.py`, minimal thinking, a paid `GOOGLE_API_KEY`), or OpenThai on the JTS gateway (`LLM_PROVIDER=jts`).
+It leads the call
 (`agent.py`, `CONVERSATION_MODE=agent`, the default). Like a person on the phone, it decides what to say
 each turn: it reacts to what the customer said, answers questions from the approved knowledge base
 (`campaigns/knowledge/*.th.md`) and the call's own facts, and moves the call along in its own words. It is
-given a checklist, not a script: who we are talking to, the recording notice, each policy item or survey
-question, the free-look notice, questions, close.
+given a checklist, not a script: who we are talking to, the recording notice and consent, the policy in
+four topic groups (coverage; premium, payment and start date; beneficiary; delivery and e-mail or address)
+or the survey questions, the free-look notice, questions, close. Each group is read in one turn and
+confirmed with one question; a customer disputing one item has that item noted for staff and the rest of
+the group confirmed. If the customer declines the recording, the audio is stopped and deleted at once and
+the call goes on with its transcript.
 
 One model call per turn returns what to say and what the customer settled. The code keeps only what is not
 the model's to change:
@@ -123,8 +130,11 @@ the model's to change:
 - no number, condition or limiting claim that the call's facts or the knowledge base do not back
   (a policy sentence must mostly match approved text);
 - a female voice ("ดิฉัน", ค่ะ/คะ; a stray ครับ is corrected), no Markdown or links;
-- an item counts as confirmed only after the customer heard its values; a plain "ครับ" after an item
-  confirms it; a survey score must be on its scale;
+- a group counts as confirmed only after the customer heard its values; a plain "ครับ" after a group
+  confirms it; a "no" naming an item records that item as disputed; a survey score must be on its scale;
+- Thai phone politeness: a stray ครับ or นะค่ะ is corrected, a question asked again must be softened
+  (ขอโทษนะคะ / ไม่ทราบว่า…), the same reply is never said twice running, and silence gets a polite
+  three-step ladder (polite check by name, then "the line may be unclear", then a face-saving goodbye);
 - the call cannot close as completed with items left.
 
 A reply that breaks a rule is sent back once with the reason; if the retry fails too, the approved line
@@ -157,9 +167,18 @@ Opt-in live test (uses quota):
 LIVE_LLM=1 uv run pytest tests/test_llm_live.py
 ```
 
-### Speech: Soniox in, JAI TTS out
+### Speech: Soniox in, Gemini TTS out
 
-**Voice (`jaitts.py`).** JAI TTS (JTS's VoxCPM model, speaker-adapted female voice), streamed as raw
+**Voice (`tts.py`).** Gemini 3.8 Flash-Lite TTS (`gemini-3.8-flash-lite-tts`) with the Achernar voice,
+chosen by the PM on 19 Oct 2026. Of six female voices auditioned (Achernar, Vindemiatrix, Sulafat, Leda,
+Despina, Callirrhoe), all read the Thai test lines word for word; Achernar is Google's softest,
+highest-pitched female voice. First audio 0.8-1.1 s. The conversation model may put audio tags in what it
+says (`<short pause>`, `<breath>`, `<chuckle>`, at most one or two a turn, never in an apology); the voice
+acts on them, transcripts and every check see the words only. The delivery style (`TTS_STYLE`) goes with
+each line as `speech_metadata` (written into the text it would be read aloud). A `-live` `TTS_MODEL` uses
+Gemini Live instead, which ignores tags.
+
+**JAI TTS (`jaitts.py`, `TTS_PROVIDER=jai`).** JAI TTS (JTS's VoxCPM model, speaker-adapted female voice), streamed as raw
 44.1 kHz PCM. Measured on 12 Oct 2026: first audio ≈0.12 s, generation ≈8× faster than real time,
 ≈13 spoken characters per second at `JAITTS_CFG=2.0` / `JAITTS_TEMPERATURE=0.7`. Each turn is one request
 so its intonation runs on like one breath; only text over 500 characters is split (after ค่ะ/คะ/ครับ), with
@@ -172,8 +191,9 @@ Latin reaches it:
 - Times are said the way Thai people say them: 00.01 น. → เที่ยงคืนหนึ่งนาที, 08.30 → แปดโมงครึ่ง,
   14.00 → บ่ายสองโมง, 19.15 → หนึ่งทุ่มสิบห้านาที.
 - Numbers, money, Buddhist-era dates, phone numbers (digit by digit) and web addresses become Thai words;
-  any other English word is said (Excel → เอ็กเซล) or spelled. Gemini Live remains available only with `TTS_PROVIDER=gemini`;
-it is never a fallback.
+  any other English word is said (Excel → เอ็กเซล) or spelled.
+- House numbers keep their ทับ (99/9 → เก้าสิบเก้าทับเก้า) and postcodes are read digit by digit.
+The voice is chosen explicitly; neither is ever a fallback for the other.
 
 **Recognition.** Soniox real-time (`soniox_asr.py`, model `stt-rt-v5`, Thai with English hints) is the
 default since 15 Oct 2026, when JaiASR went into maintenance and fine-tuning. Each call passes its own terms
@@ -241,11 +261,28 @@ uv run ruff check src tests && uv run mypy && uv run pytest -q
 pnpm --dir apps/web typecheck && pnpm --dir apps/web test && pnpm --dir apps/web build
 ```
 
+**Role-play suite (`kpi-roleplay`).** 49 scenarios, PA and survey, each played against the production LLM
+settings by a customer that Gemini plays from a persona (or a fixed script for silence): the happy path,
+wrong person, a relative, busy with and without a call-back time, refusal, do-not-call, declining or
+questioning the recording (before and after the notice), disputes, doubt, repeat requests, questions in and
+out of the knowledge, the free-look deadline, "are you a real person", off-topic chat, garbled speech,
+English mixed in, silence, score changes, scores in words, out-of-scale scores, two answers at once, no
+surveyor, complaints and abuse. Each call is checked for its outcome and result fields, and for the
+general rules: no fallback line, nothing said twice running, the name in the introduction and the
+introduction once, no "เสียงไม่ค่อยชัด" to a clear customer, no hanging up on a question, sane turn
+length and reply time, only scores the customer gave. Transcripts land in `.local/roleplay/`. It calls
+Google, so it is manual and never part of CI. The simulated customer sometimes drifts from its script;
+read the transcript before blaming the bot.
+
+```bash
+uv run kpi-roleplay --repeat 2
+```
+
 ## Key rules
 
 - One call at a time, enforced by a unique MongoDB lock. Every request needs an `Idempotency-Key`. A call is originated at most once. Callbacks are recorded tasks only, with no redial.
 - There is no allowlist of test numbers. Any valid Thai number is accepted. Non-Thai numbers are stored in E.164 but refused for dialing until an international dial format is confirmed. Internal extensions need `ALLOW_INTERNAL_EXTENSIONS=true`.
-- Live calls will be blocked outside `CALLING_START_HOUR`–`CALLING_END_HOUR` (Asia/Bangkok).
+- Live calls are blocked outside `CALLING_DAYS` `CALLING_START`–`CALLING_END` (Asia/Bangkok; default Monday–Saturday 08:30–19:00, the OIC guideline).
 - No policy-specific detail is spoken before the customer confirms their name. A wrong-person answer ends the call without disclosure.
 - Interrupted speech is tracked per segment. A fact counts as delivered only once it has been played in full.
 - If the customer objects to the transcript notice, the bot ends politely, and the call's transcript and the customer's words are discarded.

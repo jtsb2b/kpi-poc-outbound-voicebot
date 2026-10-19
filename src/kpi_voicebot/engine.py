@@ -138,6 +138,8 @@ class BaseEngine:
     ) -> None:
         self.campaign = campaign
         self.vars = {"persona_name": campaign.persona_name, "service_phone": campaign.service_phone, **variables}
+        # How to address the customer once known: คุณ + first name.
+        self.vars.setdefault("customer_first", (self.vars.get("customer_name") or "").split(" ")[0])
         self.interpreter = interpreter or RuleInterpreter()
         self.state = state or EngineState()
         self.result = result or self._initial_result()

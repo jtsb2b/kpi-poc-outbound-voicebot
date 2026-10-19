@@ -30,6 +30,8 @@ export function ResultView({ call, detailed = false }: { call: Call; detailed?: 
           <span className="kv-label">แจ้งการบันทึกเสียง</span>
           <span className="kv-value">
             <span className={`pill ${r.notice_delivered ? "good" : "neutral"}`}>{r.notice_delivered ? "แจ้งแล้ว" : "ยังไม่ได้แจ้ง"}</span>
+            {r.recording_consent === true && <span className="pill good">ยินยอมบันทึกเสียง</span>}
+            {r.recording_consent === false && <span className="pill warn">ไม่ยินยอม · บันทึกเฉพาะข้อความ</span>}
           </span>
         </div>
         {r.callback.requested && (

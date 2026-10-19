@@ -21,7 +21,7 @@ wording:
     segments: ["สวัสดีค่ะ ขอเรียนสายคุณ{customer_name}ค่ะ"]
   identity_recheck:
     status: poc_approved
-    segments: ["ขออนุญาตเรียนสาย คุณ{customer_name} ใช่ไหมคะ"]
+    segments: ["ไม่ทราบว่ากำลังเรียนสายกับคุณ{customer_name}อยู่ใช่ไหมคะ"]
   second_factor_ask:
     status: pending_kpi_approval
     segments: ["ก่อนเริ่ม ขออนุญาตยืนยันตัวตนนะคะ รบกวนแจ้งวันและเดือนเกิดของคุณลูกค้าค่ะ"]
@@ -32,17 +32,17 @@ wording:
     verbatim: true
     status: poc_approved
     segments:
-      - "ดิฉัน {persona_name} เป็น AI ผู้ช่วย ติดต่อจาก บริษัท กรุงไทยพานิชประกันภัย จำกัด (มหาชน) ค่ะ"
+      - "ดิฉัน {persona_name} ผู้ช่วย AI จาก บริษัท กรุงไทยพานิชประกันภัย จำกัด (มหาชน) ค่ะ"
       - "วันนี้โทรมาเพื่อขอบคุณ และยืนยันความคุ้มครองกรมธรรม์ประกันอุบัติเหตุส่วนบุคคลที่คุณลูกค้าได้ตกลงทำไว้ค่ะ"
-      - "รบกวนเวลาประมาณ 3 ถึง 5 นาที สะดวกไหมคะ"
+      - "ใช้เวลาประมาณ 3 ถึง 5 นาที ไม่ทราบว่าตอนนี้สะดวกคุยไหมคะ"
   availability_short:
     status: poc_approved
-    segments: ["ตอนนี้สะดวกคุยประมาณ 3 ถึง 5 นาทีไหมคะ"]
+    segments: ["ไม่ทราบว่าตอนนี้สะดวกคุยสักครู่ไหมคะ"]
   notice:
     verbatim: true
     status: poc_approved
     segments:
-      - "ขอแจ้งให้ทราบว่า การสนทนานี้จะถูกบันทึกเสียง เพื่อรักษาผลประโยชน์ของคุณลูกค้า และใช้ปรับปรุงคุณภาพการให้บริการนะคะ"
+      - "ขออนุญาตแจ้งให้ทราบว่า การสนทนานี้จะถูกบันทึกเสียง เพื่อรักษาผลประโยชน์ของคุณลูกค้า และใช้ปรับปรุงคุณภาพการให้บริการนะคะ"
   review_intro:
     status: kpi_source
     segments: ["ต่อไปขออนุญาตทวนรายละเอียดกรมธรรม์ที่คุณลูกค้าทำไว้นะคะ"]
@@ -59,20 +59,20 @@ wording:
     segments: ["ไม่ทราบว่าคุณลูกค้ามีข้อสงสัย หรืออยากสอบถามเพิ่มเติมส่วนไหนไหมคะ"]
   more_questions:
     status: poc_approved
-    segments: ["มีเรื่องอื่นที่อยากสอบถามเพิ่มเติมไหมคะ"]
+    segments: ["ไม่ทราบว่ามีเรื่องอื่นที่อยากสอบถามเพิ่มเติมไหมคะ"]
   closing:
     status: kpi_source
     segments:
       - "หากในอนาคตมีคำถามเรื่องการเคลม ต้องการแก้ไขข้อมูล หรือต้องการความช่วยเหลือ"
       - "ติดต่อศูนย์บริการลูกค้ากรุงไทยพานิชประกันภัยได้ที่ {service_phone}"
       - "หรือเว็บไซต์ www.kpi.co.th ค่ะ"
-      - "ขอขอบคุณที่มอบความไว้วางใจให้กรุงไทยพานิชประกันภัยดูแลนะคะ สวัสดีค่ะ"
+      - "ขอบพระคุณคุณ{customer_first}มากค่ะที่สละเวลา และไว้วางใจให้กรุงไทยพานิชประกันภัยดูแลนะคะ ขอให้มีวันที่ดีค่ะ สวัสดีค่ะ"
   discrepancy_ask:
     status: poc_approved
-    segments: ["ขอทราบว่าส่วนไหนไม่ตรงคะ"]
+    segments: ["ขออนุญาตทราบว่าข้อมูลส่วนไหนไม่ตรงคะ"]
   discrepancy_ack:
     status: poc_approved
-    segments: ["ขอบคุณค่ะ ดิฉันบันทึกไว้ให้เจ้าหน้าที่ตรวจสอบและติดต่อกลับนะคะ"]
+    segments: ["ขอบคุณที่แจ้งนะคะ ดิฉันขออนุญาตบันทึกไว้ให้เจ้าหน้าที่ตรวจสอบและติดต่อกลับนะคะ"]
   hedge_check:
     status: poc_approved
     segments: ["ตรงกับที่คุณลูกค้าทราบไหมคะ"]
@@ -168,6 +168,24 @@ review_units:
     confirm: "ถูกต้องไหมคะ"
     repeat:
       - text: "{delivery_target_label} {delivery_target}"
+
+# What the LLM-led agent reads in one turn (welcome-call research, 19 Oct 2026: about three items per
+# group, one confirmation question per group; beneficiary and address/e-mail confirmed on their own).
+review_groups:
+  - id: coverage
+    short: "ความคุ้มครอง"
+    units: [plan_coverage, medical, daily]
+    confirm: "ข้อมูลความคุ้มครองตามนี้ ตรงกับที่คุณลูกค้าทราบไหมคะ"
+  - id: money
+    short: "เบี้ย การชำระเงิน และวันเริ่มคุ้มครอง"
+    units: [premium, payment, effective_date]
+    confirm: "ส่วนนี้ถูกต้องไหมคะ"
+  - id: beneficiary
+    short: "ผู้รับผลประโยชน์"
+    units: [beneficiary]
+  - id: delivery
+    short: "การจัดส่งกรมธรรม์"
+    units: [delivery_channel, delivery_target]
 
 policy_fields:
   - {field: plan_name, label: "ชื่อแผน", value: "{plan_name}", keywords: ["แผน", "ชื่อแผน"]}

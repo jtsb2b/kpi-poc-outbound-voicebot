@@ -2,16 +2,16 @@
 wording:
   wrong_person_close:
     status: poc_approved
-    segments: ["ขออภัยที่รบกวนค่ะ ขอบคุณมากค่ะ สวัสดีค่ะ"]
+    segments: ["ต้องขออภัยที่รบกวนค่ะ ขอบพระคุณมากค่ะ สวัสดีค่ะ"]
   ask_callback_time:
     status: poc_approved
-    segments: ["ได้ค่ะ สะดวกให้ติดต่อกลับช่วงไหนดีคะ"]
+    segments: ["ไม่เป็นไรค่ะ ต้องขออภัยที่รบกวนนะคะ ไม่ทราบว่าสะดวกให้ติดต่อกลับช่วงเวลาไหนดีคะ"]
   callback_close:
     status: poc_approved
-    segments: ["รับทราบค่ะ ดิฉันบันทึกช่วง{callback_time}ไว้แล้วนะคะ ขอบคุณค่ะ สวัสดีค่ะ"]
+    segments: ["ได้ค่ะ ดิฉันบันทึกไว้ให้ติดต่อกลับช่วง{callback_time}นะคะ ขอบพระคุณค่ะ สวัสดีค่ะ"]
   callback_close_no_time:
     status: poc_approved
-    segments: ["ไม่เป็นไรค่ะ ขอบคุณค่ะ สวัสดีค่ะ"]
+    segments: ["ไม่เป็นไรค่ะ ขอบพระคุณที่สละเวลารับสายนะคะ สวัสดีค่ะ"]
   objection_close:
     status: poc_approved
     segments:
@@ -19,29 +19,52 @@ wording:
       - "หากต้องการติดต่อ โทรศูนย์บริการลูกค้าได้ที่ {service_phone} ค่ะ ขอบคุณค่ะ สวัสดีค่ะ"
   refuse_close:
     status: poc_approved
-    segments: ["รับทราบค่ะ ขออภัยที่รบกวนนะคะ ขอบคุณค่ะ สวัสดีค่ะ"]
+    segments: ["รับทราบค่ะ ขอบพระคุณที่สละเวลารับสายนะคะ ขอให้มีวันที่ดีค่ะ สวัสดีค่ะ"]
   dnc_close:
     status: poc_approved
-    segments: ["รับทราบค่ะ ดิฉันบันทึกไว้แล้วนะคะ ขออภัยที่รบกวนค่ะ สวัสดีค่ะ"]
+    segments: ["รับทราบค่ะ ดิฉันจะบันทึกไว้ว่าไม่ประสงค์ให้ติดต่อกลับนะคะ ต้องขออภัยที่รบกวนค่ะ สวัสดีค่ะ"]
   verification_failed_close:
     status: pending_kpi_approval
     segments: ["ขออภัยค่ะ ดิฉันยังยืนยันตัวตนไม่ได้ ขออนุญาตให้เจ้าหน้าที่ติดต่อกลับภายหลังนะคะ ขอบคุณค่ะ สวัสดีค่ะ"]
   hold_ack:
     status: poc_approved
-    segments: ["ได้ค่ะ ดิฉันรอสายนะคะ"]
+    segments: ["ได้ค่ะ ไม่เป็นไรค่ะ ดิฉันรอสายอยู่นะคะ"]
+  # Silence ladder (Thai phone politeness research, 19 Oct 2026): apology or greeting, ไม่ทราบว่า,
+  # the customer's name, then the question; next, blame the line; last, a face-saving goodbye.
   still_there:
     status: poc_approved
-    segments: ["ยังอยู่ในสายไหมคะ"]
+    segments: ["ขอโทษนะคะ ไม่ทราบว่าคุณ{customer_first}ยังอยู่ในสายไหมคะ"]
+    alternatives: ["สวัสดีค่ะ ไม่ทราบว่าคุณ{customer_first}ยังอยู่ในสายไหมคะ"]
+  still_there_line:
+    status: poc_approved
+    segments: ["สวัสดีค่ะ คุณ{customer_first}ได้ยินเสียงดิฉันชัดไหมคะ หากสัญญาณไม่ชัด รบกวนพูดอีกครั้งได้เลยนะคะ"]
+  say_again:
+    status: poc_approved
+    segments: ["ขอโทษค่ะ เมื่อสักครู่เสียงไม่ค่อยชัด รบกวนคุณ{customer_first}พูดอีกครั้งได้ไหมคะ"]
+  recording_consent:
+    verbatim: true
+    status: poc_approved
+    segments: ["ไม่ทราบว่าคุณลูกค้ายินยอมให้บันทึกเสียงการสนทนาไหมคะ"]
+  system_unavailable_close:
+    status: poc_approved
+    segments: ["ต้องขออภัยค่ะ ขณะนี้ระบบขัดข้องชั่วคราว ดิฉันขออนุญาตให้เจ้าหน้าที่ติดต่อกลับภายหลังนะคะ ขอบพระคุณค่ะ สวัสดีค่ะ"]
+  thanks_for_time:
+    status: poc_approved
+    segments: ["ขอบพระคุณค่ะ"]
+    alternatives: ["ขอบพระคุณมากค่ะ"]
+  recording_declined:
+    status: poc_approved
+    segments: ["รับทราบค่ะ ดิฉันจะไม่บันทึกเสียงการสนทนานี้นะคะ"]
   no_response_close:
     status: poc_approved
-    segments: ["ดิฉันขออนุญาตวางสายก่อนนะคะ ขอบคุณค่ะ สวัสดีค่ะ"]
+    segments: ["สัญญาณอาจขัดข้องนะคะ ดิฉันขออนุญาตติดต่อกลับมาใหม่ภายหลังนะคะ ขอบพระคุณค่ะ สวัสดีค่ะ"]
   ai_identity:
     verbatim: true
     status: poc_approved
-    segments: ["ดิฉันเป็น AI ผู้ช่วยของกรุงไทยพานิชประกันภัยค่ะ"]
+    segments: ["ดิฉันเป็นผู้ช่วย AI ของกรุงไทยพานิชประกันภัยค่ะ"]
   unknown_answer:
     status: poc_approved
-    segments: ["เรื่องนี้ดิฉันยังไม่มีข้อมูลที่ยืนยันได้ค่ะ ขอบันทึกไว้ให้เจ้าหน้าที่ติดต่อกลับเพื่อให้ข้อมูลนะคะ"]
+    segments: ["ขอบคุณที่สอบถามนะคะ เรื่องนี้ดิฉันยังไม่มีข้อมูลที่ยืนยันได้ ขออนุญาตให้เจ้าหน้าที่ติดต่อกลับเพื่อให้ข้อมูลที่ถูกต้องนะคะ"]
   return_prefix:
     status: poc_approved
     segments: ["กลับมาที่คำถามเมื่อสักครู่นะคะ"]
@@ -50,13 +73,13 @@ wording:
     segments: ["ต่อนะคะ"]
   off_topic:
     status: poc_approved
-    segments: ["ขอโทษนะคะ เรื่องนี้ดิฉันช่วยไม่ได้ ดิฉันตอบได้เฉพาะเรื่องกรมธรรม์ค่ะ"]
+    segments: ["ขออภัยนะคะ เรื่องนี้อยู่นอกเหนือที่ดิฉันดูแลค่ะ ดิฉันขอช่วยเรื่องกรมธรรม์ของคุณลูกค้านะคะ"]
   invite_question:
     status: poc_approved
     segments: ["ได้เลยค่ะ สอบถามได้เลยนะคะ"]
   invite_question_again:
     status: poc_approved
-    segments: ["ได้ค่ะ อยากสอบถามเรื่องไหนคะ"]
+    segments: ["ได้ค่ะ ไม่ทราบว่าอยากสอบถามเรื่องไหนคะ"]
   repeat_prefix:
     status: poc_approved
     segments: ["ขอทวนอีกครั้งนะคะ"]
@@ -71,4 +94,4 @@ wording:
     segments: ["เรื่อง{reflection} ดิฉันบันทึกไว้แล้วนะคะ ขอบคุณที่บอกค่ะ"]
   hold_ack_again:
     status: poc_approved
-    segments: ["ค่ะ ไม่รีบนะคะ ดิฉันรออยู่ค่ะ"]
+    segments: ["ได้ค่ะ ไม่รีบเลยนะคะ ดิฉันรออยู่ค่ะ"]

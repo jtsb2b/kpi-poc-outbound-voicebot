@@ -25,7 +25,7 @@ The operator UI is a small control surface: choose campaign → enter phone and 
 
 ## Positioning
 
-The bot runs on Soniox speech recognition (while JTS's JaiASR is in maintenance), a self-hosted LLM on the JTS gateway (OpenThai 2.0, 27B, Qwen 3.8 base) and JTS's own JAI TTS voice, over LiveKit SIP. The LLM leads the conversation from an approved knowledge base against a checklist of what the call must cover. Application code keeps the identity gate, the AI disclosure, recording notice and free-look wording, exact facts and numbers, score validation, callbacks, discrepancies, escalation and outcomes. Interrupted speech is tracked so it is never recorded as delivered.
+The bot runs on Soniox speech recognition (while JTS's JaiASR is in maintenance), Gemini 3.5 Flash-Lite as the conversation LLM (chosen by the PM for Thai politeness; OpenThai 2.0 on the JTS gateway stays selectable) and Gemini 3.8 Flash-Lite TTS's Achernar voice with audio tags (the PM's choice; JTS's JAI TTS stays selectable), over LiveKit SIP. The LLM leads the conversation from an approved knowledge base against a checklist of what the call must cover. Application code keeps the identity gate, the AI disclosure, recording notice and free-look wording, exact facts and numbers, score validation, callbacks, discrepancies, escalation and outcomes. Interrupted speech is tracked so it is never recorded as delivered.
 
 ## Operating Context
 

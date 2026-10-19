@@ -173,10 +173,10 @@ async def _with_llm(use_llm: bool, run: Run) -> None:
         await run(None, None)
         return
     from kpi_voicebot.config import get_settings
-    from kpi_voicebot.llm import LLMClient
+    from kpi_voicebot.llm import llm_client
     from kpi_voicebot.llm_interpreter import LLMInterpreter
 
-    client = LLMClient(get_settings())
+    client = llm_client(get_settings())
     try:
         await run(LLMInterpreter(client), Responder(client))
     finally:

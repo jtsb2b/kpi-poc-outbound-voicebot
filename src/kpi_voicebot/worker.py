@@ -18,6 +18,7 @@ from pymongo import AsyncMongoClient
 from kpi_voicebot.agent import make_dialogue
 from kpi_voicebot.config import Settings, get_settings
 from kpi_voicebot.dialogue import AsyncInterpreter
+from kpi_voicebot.llm import check_llm
 from kpi_voicebot.models import CallMode, CampaignId, DialResult, Directive, Lifecycle, Outcome
 from kpi_voicebot.recording import delete as delete_recording
 from kpi_voicebot.recording import object_key
@@ -235,6 +236,15 @@ class Worker:
             )
             await store.add_event(call_id, "not_dialed", {"missing": missing})
             return
+        llm_problem = await check_llm(self.responder.client) if self.responder is not None else None
+        if llm_problem:
+            # Never ring a customer for a conversation the LLM cannot hold (19 Oct test call).
+            log.error("LLM not answering, call %s not dialled: %s", call_id, llm_problem)
+            await store.finish(
+                call_id, outcome=Outcome.TECHNICAL_FAILURE, dial_result=None, result=None, end_reason="llm_unavailable"
+            )
+            await store.add_event(call_id, "not_dialed", {"llm": llm_problem})
+            return
         if not await store.mark_dial_attempted(call_id, self.worker_id):
             await store.finish(
                 call_id,
@@ -266,7 +276,7 @@ class Worker:
             dialogue,
             room_name=f"{self.settings.livekit_room_prefix}{call_id}",
             sip_call_to=destination,
-            recording_key=object_key(self.settings, call_id),
+            recording_key=object_key(self.settings, call_id, call["target_name"], call["campaign"]),
             sink=sink,
             is_canceled=lambda: store.is_cancel_requested(call_id),
             on_ringing=ringing,
@@ -287,6 +297,10 @@ class Worker:
                 end_reason="operator_canceled",
             )
             await store.add_event(call_id, "canceled", {"while": "in_conversation" if was_answered else "ringing"})
+            # The audio recorded up to the cancel is in COS: keep the call pointing at it.
+            end_so_far = getattr(phone, "_end", None)
+            if was_answered and end_so_far is not None:
+                await self._keep_or_discard_recording(call_id, end_so_far, None)
             return
         except Exception as exc:
             log.exception("live call failed for %s", call_id)
@@ -316,11 +330,23 @@ class Worker:
             return
         if end.timings:
             await store.add_event(call_id, "latency", {"reply_ready_s": [round(t, 2) for t in end.timings]})
-        await self._keep_or_discard_recording(call_id, end.recording_key, talk.outcome)
+        await self._keep_or_discard_recording(call_id, end, talk.outcome)
         await self._finish_conversation(call_id, talk)
 
-    async def _keep_or_discard_recording(self, call_id: str, key: str | None, outcome: Outcome | None) -> None:
-        """The call's audio stays in COS, unless the customer objected to being recorded."""
+    async def _keep_or_discard_recording(self, call_id: str, end: Any, outcome: Outcome | None) -> None:
+        """The call's audio stays in COS, unless the customer declined the recording. In the LLM-led
+        conversation the call then goes on and only its audio is deleted (during the call); the
+        scripted conversation ends the call on an objection and deletes the audio here."""
+        key: str | None = end.recording_key
+        if end.recording_declined:
+            status = "delete_failed" if end.recording_delete_failed else "declined"
+            await self.store.set_recording(
+                call_id, {"key": key if end.recording_delete_failed else None, "status": status}
+            )
+            await self.store.add_event(
+                call_id, "recording_declined", {"audio_deleted": not end.recording_delete_failed}
+            )
+            return
         if key is None:
             return
         if outcome is not Outcome.NOTICE_OBJECTION:
@@ -349,14 +375,16 @@ def main() -> None:
     interpreter: AsyncInterpreter | None = None
     responder: Responder | None = None
     if settings.interpreter == "llm":
-        from kpi_voicebot.llm import LLMClient
+        from kpi_voicebot.llm import llm_client as llm_client_for
         from kpi_voicebot.llm_interpreter import LLMInterpreter
 
-        llm_client = LLMClient(settings)
+        llm_client = llm_client_for(settings)
         interpreter = LLMInterpreter(llm_client)
         responder = Responder(llm_client)
         log.info(
-            "self-hosted LLM %s: reads replies and words the bot's turns (rule safety layer on)", settings.llm_model
+            "LLM %s: leads the conversation (%s mode)",
+            settings.gemini_llm_model if settings.llm_provider == "gemini" else settings.llm_model,
+            settings.conversation_mode,
         )
     else:
         log.info("reply interpretation: rules only, scripted wording")

@@ -62,6 +62,14 @@ _OBJECTION = (
     "ไม่ยินยอมให้บันทึก",
     "อย่าบันทึก",
     "ไม่ยินยอม",
+    "ไม่ให้อัด",
+    "อย่าอัด",
+    "ห้ามอัด",
+    "ไม่อยากให้อัด",
+    "ไม่ต้องบันทึก",
+    "ไม่ต้องอัด",
+    "ไม่บันทึกได้ไหม",
+    "ไม่ขอให้บันทึก",
 )
 _WRONG_PERSON = (
     "ผิดคน",
@@ -85,6 +93,10 @@ _REFUSE = (
     "จะวางสายแล้ว",
     "ไม่อยากตอบแล้ว",
     "ไม่ตอบแล้ว",
+    "ไม่อยากตอบ",
+    "วางสายได้",
+    "จะวางสาย",
+    "พอแล้ว",
 )
 _SKIP = ("ขอไม่ตอบ", "ไม่ขอตอบ", "ข้ามไป", "ขอข้าม", "ขอผ่าน", "ไม่อยากตอบข้อนี้", "ไม่ตอบข้อนี้")
 _NOT_CONVENIENT = (
@@ -208,6 +220,8 @@ _NO_COMMENT = (
     "เข้าใจแล้ว",
     "ชัดเจนแล้ว",
     "ไม่มีข้อเสนอแนะ",
+    "ไม่มีเรื่อง",  # "ไม่มีเรื่องจะสอบถามเพิ่มเติม" is a no, not a question
+    "บอกว่าไม่มี",
 )
 _AFFIRM_START = (
     "ใช่",
@@ -232,6 +246,7 @@ _AFFIRM_START = (
     "อืม",
     "ฮะ",
     "ถูกต้อง",
+    "ตรง",  # "ตรงครับ" = it matches (a "ไม่ตรง" is caught as negative first)
     "เรียบร้อย",
     "มีค่ะ",
     "มีครับ",
@@ -246,7 +261,21 @@ _AFFIRM_START = (
     "หนูเอง",
 )
 # "ถั่วต้ม" is common Thai wordplay for "ถูกต้อง".
-_AFFIRM_ANY = ("ถูกต้อง", "ใช่แล้ว", "ถูกแล้ว", "ได้เลย", "สะดวกค่ะ", "สะดวกครับ", "ตามนั้น", "ครบถ้วน", "ถั่วต้ม")
+_AFFIRM_ANY = (
+    "ถูกต้อง",
+    "ใช่แล้ว",
+    "ถูกแล้ว",
+    "ได้เลย",
+    "สะดวกค่ะ",
+    "สะดวกครับ",
+    "ตามนั้น",
+    "ครบถ้วน",
+    "ถั่วต้ม",
+    "รู้แล้ว",
+    "ทราบแล้ว",
+    "ตรงครับ",
+    "ตรงค่ะ",
+)
 _WH = ("อะไร", "ยังไง", "อย่างไร", "เท่าไหร่", "เท่าไร", "เมื่อไหร่", "เมื่อไร", "ทำไม", "ใคร", "ที่ไหน", "กี่")
 # Unsure answers: a human operator re-checks these instead of taking them as a firm yes.
 _UNSURE = ("ไม่แน่ใจ", "จำไม่ได้", "ไม่ชัวร์", "ไม่ค่อยแน่ใจ", "ไม่รู้สิ", "ไม่รู้เหมือนกัน")
@@ -511,7 +540,7 @@ def read_signals(text: str) -> Signals:
         repeat=contains_any(t, _REPEAT),
         not_applicable=contains_any(t, _NOT_APPLICABLE),
         ai_identity=contains_any(t, _AI_IDENTITY),
-        question=(contains_any(t, _QUESTION) or contains_any(t, _WH)) and not has_question,
+        question=(contains_any(t, _QUESTION) or contains_any(t, _WH)) and not has_question and not no_comment,
         negative=negative,
         no_comment=no_comment,
         affirm=affirm,
@@ -565,6 +594,18 @@ def _thai_word_number(t: str) -> int | None:
         if word in t and value > 0:
             return value
     return None
+
+
+def day_months(text: str) -> list[tuple[int, int]]:
+    """Every "1 พฤศจิกายน" / "5 ธันวา" in the text, in order (digits before the month name)."""
+    t = normalize(text)
+    names = "|".join(sorted((re.escape(k) for k in _THAI_MONTHS), key=len, reverse=True))
+    out = []
+    for m in re.finditer(rf"(\d{{1,2}})\s*({names})", t):
+        day, month = int(m.group(1)), _THAI_MONTHS[m.group(2)]
+        if 1 <= day <= 31:
+            out.append((day, month))
+    return out
 
 
 def parse_day_month(text: str) -> tuple[int, int] | None:

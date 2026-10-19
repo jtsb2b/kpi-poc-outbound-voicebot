@@ -52,7 +52,8 @@ class RequestRejected(Exception):
 
 def within_calling_hours(settings: Settings, now: datetime | None = None) -> bool:
     local = (now or datetime.now(ZoneInfo(settings.timezone))).astimezone(ZoneInfo(settings.timezone))
-    return settings.calling_start_hour <= local.hour < settings.calling_end_hour
+    clock = local.strftime("%H:%M")
+    return local.weekday() in settings.calling_days and settings.calling_start <= clock < settings.calling_end
 
 
 async def build_call_document(request: CallRequest, settings: Settings, store: Store) -> dict[str, Any]:
@@ -101,9 +102,10 @@ async def build_call_document(request: CallRequest, settings: Settings, store: S
         if not settings.live_calls_enabled:
             raise RequestRejected(409, "การโทรจริงยังไม่เปิดใช้งาน (ใช้โหมดจำลองได้)")
         if not within_calling_hours(settings):
-            raise RequestRejected(
-                409, f"อยู่นอกเวลาโทร ({settings.calling_start_hour:02d}:00–{settings.calling_end_hour:02d}:00)"
-            )
+            raise RequestRejected(409, f"อยู่นอกเวลาโทร ({settings.calling_window})")
+        if destination.e164 and await store.asked_not_to_call(destination.e164):
+            # OIC guideline: a customer's refusal is kept and respected for at least 6 months.
+            raise RequestRejected(409, "ลูกค้าเบอร์นี้ขอไม่ให้ติดต่อกลับ (ภายใน 6 เดือน)")
         if settings.livekit_missing():
             raise RequestRejected(409, "ยังตั้งค่าระบบโทรศัพท์ไม่ครบ (LiveKit / ระบบรู้จำเสียง / ระบบเสียงพูด)")
     else:

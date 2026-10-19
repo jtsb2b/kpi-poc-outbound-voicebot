@@ -220,3 +220,16 @@ async def test_worker_stops_claiming_calls_once_told_to_stop(store: Store, setti
     stop = asyncio.Event()
     stop.set()
     await asyncio.wait_for(Worker(store, settings, "w1").run_forever(stop), 1)  # returns instead of polling forever
+
+
+def test_live_calls_keep_to_the_oic_calling_hours(settings: Settings) -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from kpi_voicebot.service import within_calling_hours
+
+    bkk = ZoneInfo("Asia/Bangkok")
+    assert within_calling_hours(settings, datetime(2026, 10, 19, 8, 30, tzinfo=bkk))  # Monday 08:30
+    assert not within_calling_hours(settings, datetime(2026, 10, 19, 8, 29, tzinfo=bkk))
+    assert not within_calling_hours(settings, datetime(2026, 10, 19, 19, 0, tzinfo=bkk))
+    assert not within_calling_hours(settings, datetime(2026, 10, 18, 10, 0, tzinfo=bkk))  # Sunday

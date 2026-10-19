@@ -32,6 +32,7 @@ kpi-worker = "kpi_voicebot.worker:main"
 kpi-sim = "kpi_voicebot.simulator:main"
 kpi-tts = "kpi_voicebot.voice_cli:main"
 kpi-call = "kpi_voicebot.telephony:main"
+kpi-roleplay = "kpi_voicebot.roleplay:main"
 
 [dependency-groups]
 dev = [

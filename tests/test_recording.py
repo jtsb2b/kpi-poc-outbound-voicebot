@@ -27,8 +27,9 @@ def settings() -> Settings:
         update={
             "sim_turn_delay_ms": 0,
             "live_calls_enabled": True,
-            "calling_start_hour": 0,
-            "calling_end_hour": 24,
+            "calling_start": "00:00",
+            "calling_end": "24:00",
+            "calling_days": list(range(7)),
             "livekit_url": "wss://example.invalid",
             "livekit_api_key": SecretStr("k"),
             "livekit_api_secret": SecretStr("s"),
@@ -36,6 +37,7 @@ def settings() -> Settings:
             "sip_caller_number": "2211",
             "soniox_api_key": SecretStr("so"),
             "jaitts_api_key": SecretStr("t"),
+            "google_api_key": SecretStr("g"),
         }
     )
 
@@ -79,13 +81,11 @@ async def test_an_objected_recording_is_deleted_from_the_bucket() -> None:
         return httpx.Response(204)
 
     s = cos_settings()
-    await recording.delete(s, recording.object_key(s, "call-1"), transport=httpx.MockTransport(cos))
+    await recording.delete(s, "kpi-voicebot/recordings/19-10-2026/สมชาย_ใจดี_1.ogg", transport=httpx.MockTransport(cos))
     request = seen[0]
     assert request.method == "DELETE"
-    assert (
-        str(request.url)
-        == "https://kpi-recordings-1250000000.cos.ap-bangkok.myqcloud.com/kpi-voicebot/recordings/call-1.ogg"
-    )
+    assert request.url.host == "kpi-recordings-1250000000.cos.ap-bangkok.myqcloud.com"
+    assert request.url.path == "/kpi-voicebot/recordings/19-10-2026/สมชาย_ใจดี_1.ogg"  # sent percent-encoded
     assert request.headers["Authorization"].startswith("AWS4-HMAC-SHA256 Credential=AKIDtest/")
     assert (
         "/ap-bangkok/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date,"
@@ -148,10 +148,11 @@ async def test_recording_is_kept_normally_and_deleted_when_the_customer_objects(
     kept = await queue_live_call(client)
     worker.phone_factory = fake(answered_with("hangup"))
     await worker.process_once()
-    assert (await store.get_call(kept))["recording"] == {
-        "key": f"kpi-voicebot/recordings/{kept}.ogg",
-        "status": "stored",
-    }
+    stored = (await store.get_call(kept))["recording"]
+    assert stored["status"] == "stored"
+    folder, name = stored["key"].removeprefix("kpi-voicebot/recordings/").split("/")
+    assert dt.datetime.strptime(folder, "%d-%m-%Y")  # one folder per day
+    assert name.startswith("สมชาย_ใจดี_accident_survey_") and name.endswith(f"_{kept[:8]}.ogg")
 
     r = await client.post(
         "/api/v1/calls",
@@ -167,5 +168,13 @@ async def test_recording_is_kept_normally_and_deleted_when_the_customer_objects(
     objected = r.json()["call_id"]
     worker.phone_factory = fake(answered_with("objection"))
     await worker.process_once()
-    assert deleted == [f"kpi-voicebot/recordings/{objected}.ogg"]
+    assert len(deleted) == 1 and deleted[0].endswith(f"_{objected[:8]}.ogg")
     assert (await store.get_call(objected))["recording"] == {"key": None, "status": "discarded"}
+
+
+def test_recordings_are_filed_by_day_under_the_customers_name() -> None:
+    s = cos_settings()
+    at = dt.datetime(2026, 10, 19, 17, 30, 5, tzinfo=dt.UTC)  # 00:30 on 20 Oct in Bangkok
+    key = recording.object_key(s, "dfd6321189fe4c8c", "สมชาย ใจดี", "pa_confirmation", at)
+    assert key == "kpi-voicebot/recordings/20-10-2026/สมชาย_ใจดี_pa_confirmation_003005_dfd63211.ogg"
+    assert recording.object_key(s, "c1", "a/b ../x", "", at).count("/") == 3  # a name never makes a folder

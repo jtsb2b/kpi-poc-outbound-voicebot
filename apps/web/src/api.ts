@@ -54,6 +54,7 @@ export interface Task {
 export interface CallResult {
   identity_result: string;
   notice_delivered: boolean;
+  recording_consent?: boolean | null;
   callback: { requested: boolean; preferred_time_text?: string | null };
   policy_fields: PolicyField[];
   free_look_delivery?: string | null;

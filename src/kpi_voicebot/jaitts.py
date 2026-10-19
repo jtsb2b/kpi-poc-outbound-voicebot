@@ -57,6 +57,7 @@ class JaiVoice:
     """Reads lines aloud with JAI TTS. Same interface as the Gemini voice in `tts.py`."""
 
     sample_rate = SAMPLE_RATE
+    tags = False
     model = "jaitts"
     voice = "meera"
 

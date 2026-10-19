@@ -31,8 +31,9 @@ def settings() -> Settings:
         operator_token=SecretStr(TOKEN),
         sim_turn_delay_ms=0,
         live_calls_enabled=True,
-        calling_start_hour=0,
-        calling_end_hour=24,
+        calling_start="00:00",
+        calling_end="24:00",
+        calling_days=list(range(7)),
         livekit_url="wss://example.invalid",
         livekit_api_key=SecretStr("k"),
         livekit_api_secret=SecretStr("s"),
@@ -41,6 +42,7 @@ def settings() -> Settings:
         jaiasr_api_key=SecretStr("a"),
         soniox_api_key=SecretStr("so"),
         jaitts_api_key=SecretStr("t"),
+        google_api_key=SecretStr("g"),
     )
 
 
@@ -319,3 +321,16 @@ async def test_cutting_in_stops_the_bot_and_counts_only_what_was_heard() -> None
     await talk
     assert time.monotonic() - started < 1.5  # did not talk over the customer for the full 2 s
     assert sink.turns[0] == ("bot", "greet", False)
+
+
+async def test_a_number_that_asked_not_to_be_called_is_not_called_again(
+    client: AsyncClient, store: Store, settings: Settings
+) -> None:
+    from kpi_voicebot.models import Outcome
+
+    first = await queue_live_call(client)
+    await store.finish(
+        first, outcome=Outcome.DO_NOT_CALL, dial_result=DialResult.ANSWERED, result=None, end_reason="dnc"
+    )
+    r = await client.post("/api/v1/calls", json=live_body(), headers={"Idempotency-Key": "live-dnc-02"})
+    assert (r.status_code, r.json()["detail"]) == (409, "ลูกค้าเบอร์นี้ขอไม่ให้ติดต่อกลับ (ภายใน 6 เดือน)")

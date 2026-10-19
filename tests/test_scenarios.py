@@ -112,7 +112,7 @@ async def test_off_topic_question_gets_a_polite_no_without_a_task() -> None:
     engine.state.stage, engine.state.awaiting = "questions", "questions"
     signals = dataclasses.replace(read_signals("1+1 เท่ากับเท่าไหร่"), off_topic=True, question=True)
     directive = engine.handle("1+1 เท่ากับเท่าไหร่", signals)
-    assert "เฉพาะเรื่องกรมธรรม์" in directive.text and not engine.result.tasks
+    assert "นอกเหนือที่ดิฉันดูแล" in directive.text and not engine.result.tasks
 
 
 def test_asking_about_a_value_already_read_gets_the_value_not_a_callback() -> None:
