@@ -159,6 +159,24 @@ def _url(m: re.Match[str]) -> str:
     return _domain(host.removeprefix("www."))
 
 
+def _house_number(m: re.Match[str]) -> str:
+    # "99/9" is a house number, read เก้าสิบเก้าทับเก้า; without the ทับ the voice says เก้าสิบเก้าเก้า.
+    return f"{number_words(int(m.group(1)))}ทับ{number_words(int(m.group(2)))}"
+
+
+# Words that mark an address; a five-digit number after one is a postcode.
+_ADDRESS = re.compile(r"แขวง|เขต|ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\.|กรุงเทพ|ถนน|ถ\.|ซอย|ซ\.|หมู่|บ้านเลขที่|ที่อยู่")
+_AMOUNT_UNIT = re.compile(r"\s*(?:บาท|วัน|เดือน|ปี|คน|ครั้ง|ราย|ฉบับ|%|เปอร์เซ็นต์)")
+
+
+def _postcode(m: re.Match[str]) -> str:
+    """A postcode is read digit by digit (10500 → หนึ่งศูนย์ห้าศูนย์ศูนย์), never หนึ่งหมื่นห้าร้อย."""
+    before = m.string[max(0, m.start() - 120) : m.start()]
+    if _ADDRESS.search(before) and not _AMOUNT_UNIT.match(m.string, m.end()):
+        return digits_words(m.group(0))
+    return m.group(0)
+
+
 def _amount(m: re.Match[str]) -> str:
     whole, _, frac = m.group(0).replace(",", "").partition(".")
     spoken = number_words(int(whole))
@@ -171,8 +189,28 @@ _LATIN_WORDS = {"excel": "เอ็กเซล", "email": "อีเมล", "l
 _ACRONYMS = {"AI": "เอไอ", "PA": "พีเอ", "KPI": "เคพีไอ", "SMS": "เอสเอ็มเอส", "SIP": "ซิป", "OTP": "โอทีพี"}
 
 
-def speakable(text: str) -> str:
-    """Normalise display text into what the voice should say. Order matters."""
+# Audio tags the voice may act on (Gemini 3.8 TTS): a beat, a breath, a soft laugh. Nothing that could
+# sound impatient or theatrical on a service call (no sigh, groan or shout).
+AUDIO_TAGS = ("<short pause>", "<breath>", "<chuckle>")
+_TAG = re.compile(r"<[^<>]{1,30}>|\[[a-z ]{1,30}\]")
+
+
+def without_tags(text: str) -> str:
+    """The words alone: for transcripts, checks and voices that cannot act on tags."""
+    return re.sub(r"\s+", " ", _TAG.sub(" ", text)).strip()
+
+
+def speakable(text: str, tags: bool = False) -> str:
+    """Normalise display text into what the voice should say. With `tags`, the known audio tags are
+    kept where they are (and any other is dropped); the words between them are normalised."""
+    if tags:
+        parts = re.split(r"(<[^<>]{1,30}>)", text)
+        out = [p if p in AUDIO_TAGS else _speakable(_TAG.sub(" ", p)) for p in parts if p.strip()]
+        return re.sub(r"\s+", " ", " ".join(x for x in out if x)).strip()
+    return _speakable(_TAG.sub(" ", text))
+
+
+def _speakable(text: str) -> str:
     t = text
     t = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", t)  # Markdown link → its text, never the address twice
     t = re.sub(r"[*`]+|^\s*#+\s*", " ", t)  # stray Markdown emphasis or headings (not _ : e-mails use it)
@@ -184,6 +222,8 @@ def speakable(text: str) -> str:
     t = re.sub(r"\bQR\s*Code\b", "คิวอาร์โค้ด", t, flags=re.IGNORECASE)
     for acronym, spoken in _ACRONYMS.items():
         t = re.sub(rf"(?<![A-Za-z]){acronym}(?![A-Za-z])", spoken, t)
+    t = re.sub(r"(?<![\d/])(\d{1,5})/(\d{1,4})(?![\d/])", _house_number, t)
+    t = re.sub(r"(?<![\d,.])[1-9]\d{4}(?![\d,.])", _postcode, t)
     t = re.sub(r"\d[\d,]*(?:\.\d+)?", _amount, t)
     # A Thai voice cannot read Latin script: say known words, spell anything else.
     t = re.sub(r"[A-Za-z]+", lambda m: _LATIN_WORDS.get(m.group(0).lower()) or spell(m.group(0)), t)

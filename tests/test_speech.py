@@ -79,6 +79,7 @@ def test_turn_cache_round_trip(tmp_path: Path) -> None:
 
 class _FakeVoice:
     sample_rate = 24_000
+    tags = False
 
     def __init__(self, heard: str, seconds: list[float] | None = None) -> None:
         self.heard = heard
@@ -194,3 +195,23 @@ def test_an_unwritable_voice_cache_turns_caching_off_instead_of_failing(tmp_path
         assert (cache.enabled, cache.get("สวัสดีค่ะ")) == (False, None)
     finally:
         locked.chmod(0o700)
+
+
+def test_speakable_reads_an_address_as_a_thai_agent_does() -> None:
+    line = "ไปที่ 99/9 ถนนสาธร แขวงสีลม เขตบางรัก กรุงเทพฯ 10500 ข้อมูลตามนี้ถูกต้องไหมคะ"
+    assert speakable(line) == ("ไปที่ เก้าสิบเก้าทับเก้า ถนนสาธร แขวงสีลม เขตบางรัก กรุงเทพฯ หนึ่งศูนย์ห้าศูนย์ศูนย์ ข้อมูลตามนี้ถูกต้องไหมคะ")
+    assert speakable("เลขที่ 123/45 หมู่ 5 ต.บางพลี จ.สมุทรปราการ 10540") == (
+        "เลขที่ หนึ่งร้อยยี่สิบสามทับสี่สิบห้า หมู่ ห้า ต.บางพลี จ.สมุทรปราการ หนึ่งศูนย์ห้าสี่ศูนย์"
+    )
+    # Away from an address, or followed by a unit, five digits are still an amount.
+    assert speakable("ทุนประกัน 50000 บาท") == "ทุนประกัน ห้าหมื่น บาท"
+    assert speakable("เขตบางรัก ค่าเบี้ย 15000 บาท") == "เขตบางรัก ค่าเบี้ย หนึ่งหมื่นห้าพัน บาท"
+
+
+def test_audio_tags_reach_only_a_voice_that_acts_on_them() -> None:
+    from kpi_voicebot.tts_text import without_tags
+
+    line = "ได้ค่ะ <short pause> เบี้ย 2,000 บาท <sigh> นะคะ"
+    assert speakable(line, tags=True) == "ได้ค่ะ <short pause> เบี้ย สองพัน บาท นะคะ"  # unknown tag dropped
+    assert speakable(line) == "ได้ค่ะ เบี้ย สองพัน บาท นะคะ"  # JAI TTS, Gemini Live
+    assert without_tags(line) == "ได้ค่ะ เบี้ย 2,000 บาท นะคะ"

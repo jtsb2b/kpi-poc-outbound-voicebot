@@ -117,7 +117,7 @@ class VoicePlayer:
             if ready is None:
                 await ahead.chunks.put(None)
                 return
-            ahead.text = ready.directive.text
+            ahead.text = ready.directive.voice_text
             try:
                 async for chunk in self.reader.speak(ahead.text):
                     await ahead.chunks.put(chunk)
@@ -130,11 +130,11 @@ class VoicePlayer:
         """Read a known turn ahead (the greeting, while the phone rings). Kept apart from the
         prepared-turn read-ahead, which starts as soon as the greeting begins."""
         pinned = self.pinned = _Ahead()
-        pinned.text = directive.text
+        pinned.text = directive.voice_text
 
         async def read() -> None:
             try:
-                async for chunk in self.reader.speak(directive.text):
+                async for chunk in self.reader.speak(directive.voice_text):
                     await pinned.chunks.put(chunk)
             finally:
                 await pinned.chunks.put(None)
@@ -171,7 +171,7 @@ class VoicePlayer:
         self, directive: Directive, spoken_segments: int, waited_from: float, stop: asyncio.Event | None = None
     ) -> float:
         """Speak the turn; returns how many seconds were actually heard (less when `stop` cuts it off)."""
-        text = " ".join(s.text for s in directive.segments[:spoken_segments])
+        text = " ".join(s.voice or s.text for s in directive.segments[:spoken_segments])
         read_ahead = self.ahead.text == text or (self.pinned is not None and self.pinned.text == text)
         rate = self.rate
         slice_bytes = int(rate * SLICE_SECONDS) * 2

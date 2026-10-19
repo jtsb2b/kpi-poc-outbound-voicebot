@@ -1,9 +1,16 @@
 """Speech output: the bot's voice, streamed turn by turn.
 
-The default voice is JAI TTS (`jaitts.py`, JTS's own Thai model). Gemini Live stays available
-only when chosen explicitly (`TTS_PROVIDER=gemini`); it is never a silent fallback.
+The voice is chosen explicitly (`TTS_PROVIDER`), never a silent fallback: Gemini 3.8 Flash-Lite TTS with
+audio tags (`FlashVoice`, the PM's choice on 19 Oct 2026, voice Achernar), Gemini Live (`LiveVoice`, a
+`-live` TTS_MODEL) or JAI TTS (`jaitts.py`, JTS's own Thai model).
 
 Gemini Live notes:
+
+Measured 19 Oct 2026 (Achernar, Vindemiatrix, Sulafat, Leda, Despina, Callirrhoe): every voice read the
+Thai test lines word for word (checked by transcribing the audio with Soniox); first audio 0.4-0.8 s
+with the session opened ahead. gemini-3.8-live no longer returns its own transcript, so turns are
+played but not cached. It does not act on inline tags ("<long pause>" gave the same ~0.4 s break as
+none); gemini-3.8-flash-tts does (a 1-4.6 s pause) but starts 0.3-0.5 s later.
 
 Measured 8 Oct 2026 from Bangkok with the project key:
 - gemini-3.8-live: first audio ≈ 0.5 s, read 7/7 test lines verbatim (questions included)
@@ -32,7 +39,7 @@ from google import genai
 from google.genai import types
 
 from kpi_voicebot.config import Settings
-from kpi_voicebot.tts_text import speakable
+from kpi_voicebot.tts_text import speakable, without_tags
 
 log = logging.getLogger("kpi.tts")
 
@@ -49,6 +56,7 @@ class Voice(Protocol):
     style: str
     last_heard: str
     last_first_audio_s: float
+    tags: bool  # acts on audio tags ("<short pause>"); otherwise they are removed before it reads
 
     def stream(self, spoken: str) -> AsyncIterator[bytes]: ...
     async def connect(self) -> None: ...
@@ -78,6 +86,7 @@ def fidelity(script: str, heard: str) -> float:
 
 class LiveVoice:
     sample_rate = SAMPLE_RATE
+    tags = False  # measured 19 Oct 2026: gemini-3.8-live ignores them
 
     """Reads script lines aloud with Gemini Live, one fresh session per line.
 
@@ -171,6 +180,62 @@ class LiveVoice:
             self.last_first_audio_s = first or 0.0
 
 
+class FlashVoice:
+    """Gemini 3.8 Flash(-Lite) TTS, streamed (`generate_content_stream`), with audio tags in the text and
+    the delivery style as the part's `speech_metadata` (a style written into the text is read aloud).
+
+    Measured 19 Oct 2026 from Bangkok, gemini-3.8-flash-lite-tts, Achernar: first audio 0.8-1.1 s,
+    Thai read word for word, "<long pause>" honoured. The Interactions API, where Google documents the
+    style, took 3.7-4.7 s to first audio. No transcript comes back, so turns are played, not cached.
+    """
+
+    sample_rate = SAMPLE_RATE
+    tags = True
+
+    def __init__(self, settings: Settings, voice: str | None = None) -> None:
+        if settings.google_api_key is None:
+            raise TTSError("GOOGLE_API_KEY is not set")
+        self.client = genai.Client(api_key=settings.google_api_key.get_secret_value())
+        self.model = settings.tts_model
+        self.voice = voice or settings.tts_voice
+        self.style = settings.tts_style
+        self.last_heard = ""
+        self.last_first_audio_s = 0.0
+        self._config = types.GenerateContentConfig(
+            response_modalities=[types.Modality.AUDIO],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=self.voice))
+            ),
+        )
+
+    async def connect(self) -> None:
+        """Nothing to open ahead: each line is one HTTPS request on the client's pooled connection."""
+
+    async def close(self) -> None:
+        with contextlib.suppress(Exception):
+            await self.client.aio.aclose()
+
+    async def stream(self, spoken: str) -> AsyncIterator[bytes]:
+        started = time.monotonic()
+        first: float | None = None
+        part = types.Part(text=spoken, speech_metadata=types.SpeechMetadata(style=self.style))
+        try:
+            stream = await self.client.aio.models.generate_content_stream(
+                model=self.model, contents=[types.Content(role="user", parts=[part])], config=self._config
+            )
+            async for chunk in stream:
+                content = chunk.candidates[0].content if chunk.candidates else None
+                for p in (content.parts if content else None) or []:
+                    if p.inline_data and p.inline_data.data:
+                        if first is None:
+                            first = time.monotonic() - started
+                        yield p.inline_data.data
+        except Exception as exc:
+            raise TTSError(f"Gemini TTS failed: {exc}") from exc
+        self.last_heard = ""
+        self.last_first_audio_s = first or 0.0
+
+
 class TurnCache:
     """One PCM file per (model, voice, style, spoken turn). Only verified readings are stored."""
 
@@ -204,7 +269,7 @@ class TurnCache:
 def too_short(spoken: str, audio_seconds: float) -> bool:
     """A reading far shorter than its text: the voice dropped the line (seen once in testing)."""
     # Measured: ~11 spoken characters per second with the brisk style.
-    return audio_seconds < 0.45 * len(spoken.replace(" ", "")) / 11.0
+    return audio_seconds < 0.45 * len(without_tags(spoken).replace(" ", "")) / 11.0
 
 
 class Speaker:
@@ -219,7 +284,7 @@ class Speaker:
         self.last_retried = False
 
     async def speak(self, text: str) -> AsyncIterator[bytes]:
-        spoken = speakable(text)
+        spoken = speakable(text, tags=self.voice.tags)
         if not spoken:
             return
         cached = self.cache.get(spoken)
@@ -257,7 +322,7 @@ class Speaker:
 
     async def prerender(self, text: str, attempts: int = 4) -> bool:
         """Fill the cache with a verified reading of this turn (before any call needs it)."""
-        spoken = speakable(text)
+        spoken = speakable(text, tags=self.voice.tags)
         for _ in range(attempts):
             if not spoken or self.cache.get(spoken) is not None:
                 return True
@@ -269,7 +334,7 @@ def speaker(settings: Settings, voice: str | None = None, provider: str | None =
     """The configured voice: JAI TTS unless Gemini is chosen explicitly."""
     backend: Voice
     if (provider or settings.tts_provider) == "gemini":
-        backend = LiveVoice(settings, voice)
+        backend = LiveVoice(settings, voice) if "-live" in settings.tts_model else FlashVoice(settings, voice)
     else:
         from kpi_voicebot.jaitts import JaiVoice
 

@@ -138,6 +138,7 @@ class Segment(BaseModel):
     text: str
     facts: list[str] = []
     verbatim: bool = False  # must reach the customer word for word (notice, AI disclosure, free-look)
+    voice: str | None = None  # the text as the voice reads it, with audio tags ("<short pause>"); None: `text`
 
 
 class Directive(BaseModel):
@@ -152,6 +153,11 @@ class Directive(BaseModel):
     @property
     def text(self) -> str:
         return " ".join(s.text for s in self.segments)
+
+    @property
+    def voice_text(self) -> str:
+        """What the voice is given: the text with its audio tags (transcripts keep `text`)."""
+        return " ".join(s.voice or s.text for s in self.segments)
 
 
 class FollowUpTask(BaseModel):
@@ -191,6 +197,8 @@ class CallbackRequest(BaseModel):
 class ConversationResult(BaseModel):
     identity_result: IdentityResult = "not_reached"
     notice_delivered: bool = False
+    # Customer's answer to recording the call's audio (None: not asked). Declined: transcript only.
+    recording_consent: bool | None = None
     callback: CallbackRequest = CallbackRequest()
     policy_fields: list[PolicyFieldResult] = []
     free_look_delivery: Literal["not_delivered", "full", "resumed_after_interruption"] | None = None
