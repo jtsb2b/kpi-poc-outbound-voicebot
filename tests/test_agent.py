@@ -725,3 +725,70 @@ async def test_the_model_confirming_never_overwrites_a_no() -> None:
     a.report_delivery(1, True)
     await a.reply("ไม่ใช่ครับ ผู้รับผลประโยชน์เป็นภรรยา ชื่อนางสมศรีครับ")
     assert next(f.status for f in a.result.policy_fields if f.field == "beneficiary") == "disputed"
+
+
+async def test_a_question_followed_by_the_scale_is_not_asked_twice() -> None:
+    # 20 Oct call: "…ให้กี่คะแนนดีคะ จาก 1 ถึง 5 คะแนนค่ะ" ends on a statement; the question was added again.
+    reply = (
+        "SAY: ได้ค่ะ 4 คะแนนนะคะ สำหรับความพึงพอใจโดยรวมต่อการให้บริการของศูนย์รับแจ้งอุบัติเหตุ"
+        " คุณลูกค้าให้กี่คะแนนดีคะ จาก 1 ถึง 5 คะแนนค่ะ\nUPDATE: q1 answered 4\nEND: none"
+    )
+    a, model = agent("survey-no-surveyor", [reply])
+    a.start()
+    ready(a)
+    text = await say(a, "4 ครับ")
+    assert len(model.seen) == 1 and text.count("ความพึงพอใจโดยรวม") == 1
+
+
+async def test_a_score_already_given_is_not_asked_again() -> None:
+    stale = (
+        "SAY: 3 คะแนนนะคะ แล้วความพึงพอใจโดยรวมต่อการให้บริการของศูนย์รับแจ้งอุบัติเหตุ ให้กี่คะแนนดีคะ\n"
+        "UPDATE: q2 answered 3\nEND: none"
+    )
+    onward = (
+        "SAY: 3 คะแนนนะคะ ในเรื่องประสบการณ์ที่ได้รับจากการบริการในครั้งนี้ จาก 0 ถึง 10 ให้กี่คะแนนดีคะ\n"
+        "UPDATE: q2 answered 3\nEND: none"
+    )
+    a, model = agent("survey-no-surveyor", [stale, onward])
+    a.start()
+    ready(a)
+    a.check.status["q1"] = "4"
+    next(x for x in a.result.survey_answers if x.question == "q1").value = 4
+    a.last_reply = ["แล้วความพึงพอใจโดยรวมต่อการให้บริการของศูนย์รับแจ้งอุบัติเหตุ ให้กี่คะแนนดีคะ"]
+    text = await say(a, "3")
+    assert len(model.seen) == 2 and "ประสบการณ์" in text and a.check.status["q2"] == "3"
+
+
+async def test_not_ok_with_recording_before_the_notice_is_a_no() -> None:
+    # 21 Oct suite: "สะดวกครับ แต่ไม่สะดวกให้บันทึกเสียงนะ" was taken as agreement to record.
+    a, _ = agent("survey-no-surveyor", ["SAY: รับทราบค่ะ ดิฉันจะไม่บันทึกเสียงนะคะ ข้อแรกให้กี่คะแนนดีคะ\nEND: none"])
+    a.start()
+    a.check.identity, a.check.ai_disclosed = "confirmed", True
+    await a.reply("สะดวกครับ แต่ไม่สะดวกให้บันทึกเสียงนะ")
+    assert a.check.consent == "declined" and not a.consent_offered
+
+
+async def test_one_score_is_never_given_to_two_questions() -> None:
+    # 21 Oct suite: the rules took "ให้ 5" for q1, the model took it for q2 as well and skipped to q3.
+    a, _ = agent(
+        "survey-surveyor",
+        ["SAY: ได้ค่ะ 5 คะแนนนะคะ ส่วนความรวดเร็วของพนักงานสำรวจภัย ให้กี่คะแนนดีคะ\nUPDATE: q2 answered 5\nEND: none"],
+    )
+    a.start()
+    ready(a)
+    a.last_reply = ["ในเรื่องความสะดวกในการติดต่อศูนย์รับแจ้งอุบัติเหตุ ให้กี่คะแนนดีคะ"]
+    await a.reply("ให้ 5 คะแนนครับ")
+    assert a.check.status["q1"] == "5" and a.check.status["q2"] == "pending"
+
+
+async def test_a_score_question_asked_twice_without_a_score_is_skipped() -> None:
+    a, _ = agent("survey-no-surveyor", ["SAY: รับทราบค่ะ มีข้อเสนอแนะเพิ่มเติมไหมคะ\nEND: none"])
+    a.start()
+    ready(a)
+    a.check.status.update(q1="4", q2="4")
+    ask = "ในเรื่องประสบการณ์ที่ได้รับจากการบริการในครั้งนี้ จาก 0 ถึง 10 ให้กี่คะแนนดีคะ"
+    a.history += [("bot", ask), ("customer", "ไม่มีครับ"), ("bot", ask)]
+    a.last_reply = [ask]
+    await a.reply("ไม่มีครับ")
+    q5 = next(x for x in a.result.survey_answers if x.question == "q5")
+    assert q5.status == "skipped" and a.check.status["q5"] == "skipped"

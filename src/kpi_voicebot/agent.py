@@ -311,12 +311,48 @@ def _label_fit(label: str, text: str) -> tuple[float, int]:
 _OTHER_PERSON = re.compile(r"ไม่อยู่|พ่อ|แม่|สามี|ภรรยา|ลูก(ชาย|สาว)|แฟน|ญาติ|แทน|ไม่ใช่")
 
 
+def _declines_recording(text: str) -> bool:
+    """A no to the recording: the phrases in thai_parse, or any "ไม่ … บันทึก/อัด" ("ไม่สะดวกให้บันทึกเสียงนะ"
+    was taken as agreement on 21 Oct because it also says "สะดวกครับ")."""
+    return read_signals(text).objection or bool(re.search(r"ไม่(?!มีปัญหา|เป็นไร|ว่า)\S{0,16}(บันทึก|อัด)", text))
+
+
 def _consents(text: str) -> bool:
     """A yes to the recording: "ยินยอมครับ", "ตกลง", "ได้ครับ", "บันทึกได้เลย" (never "ไม่ยินยอม", never a bare "ก็ครับ")."""
     s = read_signals(text)
-    if s.objection or s.negative or s.question:
+    negative = s.negative and not re.search(r"ไม่มีปัญหา|ไม่เป็นไร", text)  # "ไม่มีปัญหา บันทึกได้" is a yes
+    if _declines_recording(text) or negative or s.question:
         return False
     return s.affirm or bool(re.search(r"(?<!ไม่)(ยินยอม|ยินดี|ตกลง|โอเค|ตามสบาย|เชิญ|บันทึกไป|อัดไป|(?<!ไม่)ได้)", text, re.I))
+
+
+_QUESTION_WORDS = re.compile(r"กี่|ไหม|มั้ย|อะไร|อย่างไร|ยังไง|เท่าไหร่|หรือเปล่า|ไหน|เมื่อไหร่")
+
+
+def _sentences(lines: list[str]) -> list[str]:
+    return [x for line in lines for x in re.split(r"(?<=ค่ะ)\s+|(?<=คะ)\s+", without_tags(line)) if x]
+
+
+def _asks_anything(lines: list[str]) -> bool:
+    """Some sentence of the turn puts a question to the customer: "…ให้กี่คะแนนดีคะ จาก 1 ถึง 5 คะแนนค่ะ"
+    asks, though its last sentence is a statement (20 Oct call: the question was added a second time)."""
+    return any(
+        (x.endswith("คะ") and not x.endswith("นะคะ"))
+        or "รบกวน" in x
+        or x.endswith("ด้วยนะคะ")
+        or bool(_QUESTION_WORDS.search(x))
+        for x in _sentences(lines)
+    )
+
+
+_FILLER = re.compile(r"ในเรื่อง|แล้ว|และ|คุณลูกค้า|ให้กี่คะแนนดีคะ|ให้กี่คะแนน|ดีคะ|\(.*?\)")
+
+
+def _item_fit(item: Item, text: str) -> tuple[float, int]:
+    """How well the text asks this question: by its label or by its approved wording without the words
+    every question shares (q5's label "ประสบการณ์การบริการของกรุงไทยพานิช…" never matched how it is asked,
+    "ประสบการณ์ที่ได้รับจากการบริการในครั้งนี้")."""
+    return max(_label_fit(item.label, text), _label_fit(_FILLER.sub(" ", item.approved), text))
 
 
 def _asks(lines: list[str]) -> bool:
@@ -388,6 +424,7 @@ class CallAgent:
         self.last_metrics: dict[str, Any] = {}
         self.decline_ack_due = False
         self.date_hint = ""  # free-look dates worked out for this turn
+        self.rule_scored: str | None = None  # the score question the rules answered from this turn's words
         self.free_look_received: dt.date | None = None  # the receipt date the customer gave for them
         self.consent_offered = False  # the customer agreed to the recording before the notice
         self.close_blocked = 0  # closes refused for items left; the second one is let through
@@ -498,6 +535,7 @@ class CallAgent:
         self.history.append(("customer", customer))
         signals = read_signals(customer)
         self.date_hint = self._free_look_dates(customer)
+        self.rule_scored = None
         feedback_was_asked = self.check.feedback_asked
         self._settle_by_rules(customer)
         first = str(self.vars.get("customer_first") or "")
@@ -525,6 +563,9 @@ class CallAgent:
                 problem = f"llm: {exc}"
                 if re.search(r"HTTP (503|429)", str(exc)):
                     await asyncio.sleep(0.4)  # Google overloaded (19 Oct): a breath before the retry often helps
+                elif wait := re.search(r"rate limit: would wait ([\d.]+)s", str(exc)):
+                    # Our own request budget, not the LLM failing: wait it out rather than end the call (21 Oct).
+                    await asyncio.sleep(min(float(wait.group(1)), 2.0))
                 continue  # once more: most failures are momentary
             out = parse_turn(text)
             out["reply"] = tidy(out["reply"])
@@ -571,9 +612,10 @@ class CallAgent:
             answer.feedback_raw = answer.feedback_raw or customer
             c.feedback_pending = None
         lines = [s.strip() for s in out["reply"] if without_tags(s)]
-        if hanging and not out.get("end_call"):
+        if hanging and not out.get("end_call") and not _asks_anything(lines):
             # "ได้ค่ะ 5 คะแนนนะคะ" and nothing after it, twice: ask the next question in the approved words,
             # or the customer guesses what comes next and the scores land on the wrong questions (19 Oct).
+            # Never a question the turn already asks (20 Oct call: the same question twice in one turn).
             lines = [*lines, *self._next_step_lines()]
         # Asked only if this turn ends on a question that is not the next score question.
         last = re.split(r"(?<=ค่ะ)\s+|(?<=คะ)\s+", lines[-1])[-1] if lines else ""
@@ -595,18 +637,19 @@ class CallAgent:
         introduction it means the customer is available to talk."""
         s = read_signals(customer)
         c = self.check
-        if not c.notice and c.consent == "pending" and "บันทึก" in customer and s.affirm and not s.objection:
+        declines = _declines_recording(customer)
+        if not c.notice and c.consent == "pending" and "บันทึก" in customer and _consents(customer) and not declines:
             self.consent_offered = True  # "บันทึกเสียงได้ครับ" before being asked: the notice is still owed
-        if s.objection and c.consent == "pending" and not c.notice:
+        if declines and c.consent == "pending" and not c.notice:
             # "ไม่ให้บันทึกเสียงนะ" before the notice: the customer raised it; no need to ask any more.
             c.notice = True
             self._set_consent("declined")
             return
-        if s.objection and c.consent == "granted":
+        if declines and c.consent == "granted":
             # "บอกแล้วว่าไม่ให้บันทึกเสียง": consent can be withdrawn at any time; the audio stops and is deleted.
             self._set_consent("declined")
         if c.notice and c.consent == "pending":
-            if s.objection or (s.negative and not s.question):
+            if declines or (s.negative and not s.question):
                 self._set_consent("declined")
             elif _consents(customer) and not s.hedged:
                 self._set_consent("granted")
@@ -666,6 +709,14 @@ class CallAgent:
         pending = [i for i in scored if not self._done(i)]
         if not pending:
             return
+        if score.value is None and not score.candidates and not s.not_applicable and not s.question:
+            asked = self._last_asked_score(last, pending)
+            if asked is not None and self._times_asked(asked) >= 2:
+                # Asked twice and no score ("ไม่มีครับ"): note it and move on, never ask a third time.
+                answer = next(a for a in self.result.survey_answers if a.question == asked.id)
+                answer.status, answer.raw_utterance = "skipped", customer
+                self.check.status[asked.id] = "skipped"
+                return
         if s.not_applicable:
             for item in (i for i in pending if i.allow_na):
                 self._apply_item(item, "not_applicable", -1, customer)
@@ -676,11 +727,24 @@ class CallAgent:
         # สำหรับความสะดวก… ส่วนความพึงพอใจโดยรวม… ให้กี่คะแนนดีคะ" asks the second).
         # Every score question competes, answered ones too: q2 "ความพึงพอใจโดยรวมต่อศูนย์รับแจ้ง…" and q4
         # "ความพึงพอใจโดยรวมต่อการให้บริการสำรวจ…" share most words, and a reply to one landed on the other.
-        placed = [(fit, i) for i in scored if (fit := _label_fit(i.label, last))[0] >= 0.75]
+        placed = [(fit, i) for i in scored if (fit := _item_fit(i, last))[0] >= 0.75]
         if placed:
             item = max(placed, key=lambda p: (p[0][1], p[0][0]))[1]
             if item in pending and item.scale[0] <= score.value <= item.scale[1]:
                 self._apply_item(item, "answered", score.value, customer)
+                self.rule_scored = item.id
+
+    def _last_asked_score(self, last: str, pending: list[Item]) -> Item | None:
+        fits = [(f, i) for i in pending if (f := _item_fit(i, last))[0] >= 0.75]
+        return max(fits, key=lambda p: (p[0][1], p[0][0]))[1] if fits else None
+
+    def _times_asked(self, item: Item) -> int:
+        """Bot turns that put this score question to the customer."""
+        return sum(
+            1
+            for who, t in self.history
+            if who == "bot" and re.search(r"กี่คะแนน|ให้กี่|คะแนนเท่าไหร่|สะดวกให้คะแนน", t) and _item_fit(item, t)[0] >= 0.75
+        )
 
     def messages(self, customer: str) -> list[dict[str, str]]:
         talk = "\n".join(f"{'ดิฉัน' if who == 'bot' else 'ลูกค้า'}: {said}" for who, said in self.history[-16:-1])
@@ -692,6 +756,11 @@ class CallAgent:
             + f"\n\nบทสนทนาที่ผ่านมา:\n{talk or '-'}\n\nลูกค้าเพิ่งพูดว่า: {customer}"
             + (f"\n\n{self.date_hint}" if self.date_hint else "")
             + self._repeat_hint(customer)
+            + (
+                f"\n(คะแนนที่ลูกค้าเพิ่งพูดเป็นของข้อ {self.rule_scored} ระบบบันทึกแล้ว: รับทราบแล้วถามข้อถัดไป ห้ามนำคะแนนนี้ไปใส่ข้ออื่น)"
+                if self.rule_scored
+                else ""
+            )
             + self._variety_hint()
         )
         return [{"role": "system", "content": system_prompt(self.campaign.id)}, {"role": "user", "content": user}]
@@ -981,9 +1050,7 @@ class CallAgent:
             if c.status[item.id] != str(score) and not self._score_heard(score, item, customer):
                 return f"ลูกค้ายังไม่ได้บอกคะแนน {score} สำหรับ {item.id} ห้ามเดาคะแนน ถามลูกค้าอย่างสุภาพ (ไม่ต้อง UPDATE)"
         scored = any(u.get("status") == "answered" for u in out.get("updates") or [])
-        last = lines[-1]
-        asks = (last.endswith("คะ") and not last.endswith("นะคะ")) or "รบกวน" in last or last.endswith("ด้วยนะคะ")
-        if scored and not out.get("end_call") and not asks:
+        if scored and not out.get("end_call") and not _asks_anything(lines):
             # "ได้ค่ะ 3 คะแนนนะคะ" and silence: the customer is left guessing what comes next (19 Oct test).
             return "รับคะแนนแล้ว ให้ถามเรื่องถัดไปต่อในตาเดียวกัน ห้ามหยุดเฉยๆ"
         heard = read_signals(customer)
@@ -991,6 +1058,9 @@ class CallAgent:
         if unwilling and not out.get("end_call"):
             # "ไม่อยากตอบแล้ว" said seven times in the 19 Oct suite while the bot kept asking.
             return "ลูกค้าไม่อยากคุยต่อ: ขออภัยสั้นๆ ขอบพระคุณที่สละเวลา แล้วปิดสายในตานี้ (END: refused)"
+        answered = self._asks_answered_score(lines, out)
+        if answered:
+            return f"ข้อ {answered} ลูกค้าตอบแล้ว ห้ามถามซ้ำ ให้ถามข้อถัดไปในรายการ"
         if out.get("end_call") and out.get("end_reason") == "completed" and unwilling and self._left_after(out):
             out["end_reason"] = "refused"  # "ไม่อยากตอบแล้ว": let the customer go, never hold them for the list
         if (
@@ -1019,6 +1089,22 @@ class CallAgent:
             return any(v in self.check.heard for v in item.values)
         said = _flat(" ".join(t for who, t in self.history if who == "bot"))
         return _flat(item.label)[:12] in said
+
+    def _asks_answered_score(self, lines: list[str], out: dict[str, Any]) -> str | None:
+        """A score question the customer has already answered, asked again ("3 คะแนนนะคะ แล้วความพึงพอใจ
+        โดยรวม… ให้กี่คะแนนดีคะ" right after "3"; 20 Oct call). Fine only when the customer is changing it."""
+        changing = {u.get("item") for u in out.get("updates") or []}
+        scored = [i for i in self.items if i.kind == "score"]
+        for sentence in _sentences(lines):
+            if not re.search(r"กี่คะแนน|ให้กี่|คะแนนเท่าไหร่", sentence):
+                continue
+            fits = [(f, i) for i in scored if (f := _item_fit(i, sentence))[0] >= 0.75]
+            if not fits:
+                continue
+            item = max(fits, key=lambda p: p[0][0])[1]
+            if self._done(item) and item.id not in changing:
+                return item.id
+        return None
 
     def _score_heard(self, score: int, item: Item, customer: str) -> bool:
         """The customer gave this score: said it now ("ให้สัก 3", "เต็ม"), said "ใช่" to the bot reading it
@@ -1126,6 +1212,16 @@ class CallAgent:
                 item = next((i for i in self.items if i.id == name), None)
                 elsewhere = item is not None and named_fields and not (named_fields & set(item.fields))
                 disputes = item is not None and item.kind == "fact" and status in ("disputed", "unclear")
+                double = (
+                    item is not None
+                    and item.kind == "score"
+                    and self.rule_scored not in (None, item.id)
+                    and status == "answered"
+                    and heard.score.value is not None
+                    and not heard.score.candidates
+                )
+                if double:
+                    continue  # one score said, already the asked question's (21 Oct: "ให้ 5" landed on q1 and q2)
                 if item is not None and not (disputes and (asked_only or elsewhere)):
                     self._apply_item(item, status, u.get("score"), note or customer)
         follow = out.get("follow_up") or {}
