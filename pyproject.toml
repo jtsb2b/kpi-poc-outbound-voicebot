@@ -24,6 +24,7 @@ dependencies = [
     "livekit-plugins-silero>=1.8.6",
     "livekit-plugins-soniox>=1.8.6",
     "livekit-plugins-ai-coustics>=0.3.0",
+    "av>=14",  # Opus/OGG for the call recording (bundles ffmpeg and libopus)
 ]
 
 [project.scripts]

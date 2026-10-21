@@ -33,6 +33,7 @@ Copy `.env.example` to the ignored `.env` (or point `COMPOSE_ENV_FILE` at anothe
 - Voice: `TTS_PROVIDER=gemini` (`TTS_MODEL=gemini-3.8-flash-lite-tts`, `TTS_VOICE=Achernar`, the same `GOOGLE_API_KEY`), or
   `TTS_PROVIDER=jai` with `JAITTS_BASE_URL`, `JAITTS_API_KEY`.
 - Recording: `COS_SECRET_ID`, `COS_SECRET_KEY`, `COS_REGION`, `COS_BUCKET` (recording is off unless all four are set).
+  The worker records and uploads the audio itself; LiveKit egress is not used, so no LiveKit egress minutes are needed.
 - `LIVE_CALLS_ENABLED`: `false` until live calling is approved. Simulation works either way.
 - Calling hours: `CALLING_START`, `CALLING_END`, `CALLING_DAYS`, `TIMEZONE` (default Monday–Saturday 08:30–19:00 Asia/Bangkok, the OIC guideline).
 - Optional: `WEB_PORT`, `RETENTION_DAYS`, `CORS_ORIGINS`.
@@ -85,8 +86,8 @@ Deploying the containers elsewhere does not fix it. One of these does:
 - A simulated call for each campaign reaches `ended` with a result and transcript.
 - With `LIVE_CALLS_ENABLED=true`, a live call to an internal test number: the phone shows 02-100-4148,
   the bot greets at once, and the result, transcript and recording (in COS) appear afterwards.
-- A customer who declines the recording: the audio recording is stopped and deleted, the call goes on, and
-  the transcript and result are kept (decided by the PM on 19 Oct 2026).
+- A customer who declines the recording: no audio is kept, the call goes on, and the transcript and result
+  are kept (decided by the PM on 19 Oct 2026). A recording that could not be stored shows as failed on the call.
 - Live calls are refused outside Monday–Saturday 08:30–19:00 and to a number that asked not to be called
   in the last 6 months.
 - No call is ever redialled automatically; busy, no answer and failures are recorded once.

@@ -717,6 +717,7 @@ name = "kpi-voicebot"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "av" },
     { name = "certifi" },
     { name = "fastapi" },
     { name = "google-genai" },
@@ -752,6 +753,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "av", specifier = ">=14" },
     { name = "certifi", specifier = ">=2026.7.22" },
     { name = "fastapi", specifier = ">=0.142" },
     { name = "google-genai", specifier = ">=1.50" },

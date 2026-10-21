@@ -334,18 +334,18 @@ class Worker:
         await self._finish_conversation(call_id, talk)
 
     async def _keep_or_discard_recording(self, call_id: str, end: Any, outcome: Outcome | None) -> None:
-        """The call's audio stays in COS, unless the customer declined the recording. In the LLM-led
-        conversation the call then goes on and only its audio is deleted (during the call); the
-        scripted conversation ends the call on an objection and deletes the audio here."""
+        """Where the call's audio ended up. The worker records the call itself and uploads it at
+        hang-up; a declined recording keeps no audio (the transcript stays), a failed one says so. The
+        scripted conversation ends the call on an objection, and its file is deleted here."""
         key: str | None = end.recording_key
         if end.recording_declined:
-            status = "delete_failed" if end.recording_delete_failed else "declined"
-            await self.store.set_recording(
-                call_id, {"key": key if end.recording_delete_failed else None, "status": status}
-            )
-            await self.store.add_event(
-                call_id, "recording_declined", {"audio_deleted": not end.recording_delete_failed}
-            )
+            await self.store.set_recording(call_id, {"key": None, "status": "declined"})
+            await self.store.add_event(call_id, "recording_declined", {"audio_kept": False})
+            return
+        if getattr(end, "recording_failed", False):
+            # 20 Oct 2026: a call went unrecorded and nothing on the call said so.
+            await self.store.set_recording(call_id, {"key": None, "status": "failed"})
+            await self.store.add_event(call_id, "recording_failed", {})
             return
         if key is None:
             return

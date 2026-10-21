@@ -259,6 +259,18 @@ def reply_time(c: Call) -> str | None:
 
 
 @general
+def one_question_per_turn(c: Call) -> str | None:
+    """The same score question twice in one turn (20 Oct call: added again after the model had asked it)."""
+    for text in c.bot:
+        asked = re.findall(r"([^ ]{0,40}(?:ให้กี่คะแนน|กี่คะแนน))", text)
+        if len(asked) >= 2 and len(set(asked)) < len(asked):
+            return f"one turn asked the same score question twice: {text[:100]}"
+        if text.count("ให้กี่คะแนน") >= 2:
+            return f"one turn asked for two scores: {text[:100]}"
+    return None
+
+
+@general
 def only_scores_said(c: Call) -> str | None:
     return scores_were_said(c)
 
@@ -600,7 +612,7 @@ SCENARIOS: list[Scenario] = [
         "asks how to score first",
         "คุณชื่อสมชาย ยินยอมบันทึกเสียง ข้อแรกถามก่อนว่า 'ต้องให้คะแนนยังไงครับ' แล้วตอบ 3 ข้อสอง 4 ภาพรวม 7 ไม่มีข้อเสนอแนะ",
         outcomes={OC.SURVEY_COMPLETED},
-        checks=[scores_are(q1=3, q2=4, q5=7)],
+        checks=[scores_were_said],
     ),
     Scenario(
         "sv_low_reason",

@@ -22,10 +22,10 @@ Outbound Thai voicebot POC for KPI (กรุงไทยพานิชปร�
 | Approved knowledge base for the LLM (`campaigns/knowledge/*.th.md`, built from the approved scripts and FAQ) | done: fixed prompt prefix (cached by the gateway), guarded so its facts can be used but not stretched |
 | LLM-led conversation (`agent.py`, `CONVERSATION_MODE=agent`, default with `INTERPRETER=llm`) | done: the model talks freely from the knowledge base against a checklist; code keeps the disclosures word for word, the facts exact, the results and the close; `scripted` keeps the old reworded-script mode |
 | Phone calls over LiveKit Cloud SIP (trunk `ST_NbZaAsMDs5Br`, From 2211 → 02-100-4148, ai-coustics QUAIL_VF_S on the caller's audio as in the inbound bot), shared voice loop with barge-in, `kpi-call` test command, live mode in the UI | done: live calls tested 14–16 Oct 2026; audio is laggy because LiveKit Cloud routes Bangkok through India (see `DEPLOYMENT_HANDOFF.md`) |
-| Call recording to Tencent COS (`recording.py`: LiveKit egress, room audio as Opus, deleted if the customer objects) | built and tested without COS (LiveKit accepts the egress); **needs the COS settings in `.env`** |
+| Call recording to Tencent COS (`recording.py`: recorded by the worker, both sides mixed as Opus/OGG, uploaded at hang-up; nothing kept if the customer declines; a failure is marked on the call) | done; verified against the real bucket |
 | Docker Compose (`docker-compose.yml`: MongoDB, API, worker, web on http://localhost:8080; see `DEPLOYMENT_HANDOFF.md`) and GitHub Actions CI (lint, types, tests, web build, image builds; no secrets, never dials) | done and run locally; deployment waits for localhost acceptance and a Bangkok-side LiveKit route |
 
-Call audio is recorded to Tencent COS once the `COS_*` settings are set (approved by the PM on 8 Oct 2026): from the answer on, both sides mixed, as `<COS_PREFIX>/<call id>.ogg`. If the customer objects to recording, the file is deleted along with the transcript. The recording notice is part of the approved opening. Transcripts, structured results and call events are stored in MongoDB and expire after `RETENTION_DAYS` (default 30).
+Call audio is recorded to Tencent COS once the `COS_*` settings are set (approved by the PM on 8 Oct 2026): from the answer on, both sides mixed by the worker itself (the bot's speech where it was actually heard, the customer's audio as it came down the line), encoded as Opus/OGG and uploaded at hang-up to `<COS_PREFIX>/DD-MM-YYYY/<customer>_<campaign>_<HHMMSS>_<call id>.ogg`. A customer who declines gets no audio kept; the transcript stays. A recording that could not be stored is marked `failed` on the call. (LiveKit egress did this until 20 Oct 2026, when the LiveKit Cloud project ran out of egress minutes.) The recording notice is part of the approved opening. Transcripts, structured results and call events are stored in MongoDB and expire after `RETENTION_DAYS` (default 30).
 
 ## Layout
 
@@ -47,7 +47,7 @@ src/kpi_voicebot/
   mic.py            the same loop on this computer's microphone (kpi-sim chat --mic)
   agent.py          LLM-led conversation: one model turn per reply, checklist + rules kept by code
   soniox_asr.py     Soniox real-time recogniser (the default; same interface as the JaiASR client in asr.py)
-  recording.py      call recording: LiveKit egress to Tencent COS; deletion on objection (S3 SigV4)
+  recording.py      call recording: both sides mixed in the worker, Opus/OGG, upload and delete in COS (S3 SigV4)
   knowledge.py      loads campaigns/knowledge/: approved knowledge the LLM may use (no customer data)
   excel_io.py       import, export (formula-safe), template
   api.py            FastAPI operator API
@@ -119,8 +119,8 @@ given a checklist, not a script: who we are talking to, the recording notice and
 four topic groups (coverage; premium, payment and start date; beneficiary; delivery and e-mail or address)
 or the survey questions, the free-look notice, questions, close. Each group is read in one turn and
 confirmed with one question; a customer disputing one item has that item noted for staff and the rest of
-the group confirmed. If the customer declines the recording, the audio is stopped and deleted at once and
-the call goes on with its transcript.
+the group confirmed. If the customer declines the recording, no audio is kept and the call goes on with its
+transcript.
 
 One model call per turn returns what to say and what the customer settled. The code keeps only what is not
 the model's to change:

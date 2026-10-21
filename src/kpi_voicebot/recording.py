@@ -1,32 +1,116 @@
-"""Call recording: LiveKit egress records the call room (bot and customer mixed) as Opus audio and
-uploads it to Tencent COS through COS's S3-compatible API (approved by the PM on 8 Oct 2026).
+"""Call recording to Tencent COS (approved by the PM on 8 Oct 2026), made by the worker itself.
 
-Recording starts when the customer answers; the opening tells them the call is recorded. If the
-customer objects to the recording, the call's file is deleted, as its transcript is. Deleting is one
-signed S3 request (AWS Signature Version 4, which COS accepts), so no S3 SDK is needed.
+The bot already has both sides of the call: the customer's audio arrives on their track and the bot's
+own voice goes out through `RoomOut`. `CallRecorder` lays both on one timeline (the bot's speech where it
+was actually played, cut where the customer interrupted it), and at hang-up mixes them, encodes Opus in
+OGG with PyAV and uploads the file with one signed S3 PUT (AWS Signature Version 4, which COS accepts),
+so no S3 SDK is needed. A customer who declines the recording gets nothing uploaded; the transcript is
+kept (PM, 19 Oct 2026).
+
+LiveKit egress did this until 20 Oct 2026, when the LiveKit Cloud project ran out of egress minutes and
+the call went unrecorded ("egress minutes exceeded"); recording in the worker costs nothing per minute.
 """
 
 import datetime as dt
 import hashlib
 import hmac
+import io
 import logging
 import re
-from dataclasses import dataclass
+import time
+from collections.abc import Callable
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import httpx
-from livekit import api
+import numpy as np
 
 from kpi_voicebot.config import Settings
 
 log = logging.getLogger("kpi.recording")
 
+RATE = 16_000  # the recording's sample rate: the customer's audio arrives at it; speech needs no more
+OPUS_BITRATE = 24_000  # about 180 KB a minute
 
-@dataclass(frozen=True)
-class Recording:
-    egress_id: str
-    key: str  # object key in the COS bucket
+
+class CallRecorder:
+    """Both sides of one call on a shared timeline, mixed and encoded when the call ends."""
+
+    def __init__(self, clock: Callable[[], float] | None = None) -> None:
+        self.clock = clock or time.monotonic
+        self.started = self.clock()
+        self.discarded = False
+        self._customer = bytearray()  # continuous, from `_customer_at`
+        self._customer_at: float | None = None
+        self._bot: list[tuple[float, np.ndarray]] = []  # (when it plays, samples at RATE)
+
+    def customer(self, pcm: bytes) -> None:
+        """The customer's audio, 16 kHz mono, as it arrives (a continuous stream)."""
+        if self.discarded:
+            return
+        if self._customer_at is None:
+            self._customer_at = self.clock() - len(pcm) / 2 / RATE
+        self._customer += pcm
+
+    def bot(self, pcm: bytes, rate: int, plays_at: float) -> None:
+        """The bot's voice as handed to the line, with the time it will be heard."""
+        if self.discarded or len(pcm) < 2:
+            return
+        samples = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype=np.int16)
+        if rate != RATE:
+            n = max(1, round(len(samples) * RATE / rate))
+            samples = np.interp(np.linspace(0, len(samples) - 1, n), np.arange(len(samples)), samples).astype(np.int16)
+        self._bot.append((plays_at, samples))
+
+    def cut_bot(self, at: float) -> None:
+        """The customer cut in and the rest of the turn was never played: drop it from the recording."""
+        kept = []
+        for start, samples in self._bot:
+            if start >= at:
+                continue
+            heard = int((at - start) * RATE)
+            kept.append((start, samples[:heard]))
+        self._bot = kept
+
+    def discard(self) -> None:
+        """The customer declined the recording: keep nothing."""
+        self.discarded = True
+        self._customer.clear()
+        self._bot.clear()
+
+    @property
+    def seconds(self) -> float:
+        return len(self.mix()) / RATE
+
+    def mix(self) -> np.ndarray:
+        def offset(t: float) -> int:
+            return max(0, int((t - self.started) * RATE))
+
+        customer = np.frombuffer(bytes(self._customer), dtype=np.int16)
+        tracks = [(offset(self._customer_at), customer)] if self._customer_at is not None and len(customer) else []
+        tracks += [(offset(t), s) for t, s in self._bot]
+        length = max((o + len(s) for o, s in tracks), default=0)
+        mixed = np.zeros(length, dtype=np.int32)
+        for o, samples in tracks:
+            mixed[o : o + len(samples)] += samples
+        return np.clip(mixed, -32768, 32767).astype(np.int16)
+
+    def encode(self) -> bytes:
+        """Opus in OGG, the format the recordings have always had."""
+        import av  # PyAV ships with livekit-agents and bundles libopus
+
+        samples = self.mix()
+        out = io.BytesIO()
+        with av.open(out, "w", format="ogg") as container:
+            stream = container.add_stream("libopus", rate=RATE, layout="mono")
+            stream.bit_rate = OPUS_BITRATE
+            frame = av.AudioFrame.from_ndarray(samples.reshape(1, -1), format="s16", layout="mono")
+            frame.sample_rate = RATE
+            for packet in stream.encode(frame):
+                container.mux(packet)
+            for packet in stream.encode(None):
+                container.mux(packet)
+        return out.getvalue()
 
 
 def object_key(
@@ -47,32 +131,34 @@ def _safe(text: str) -> str:
     return "_".join(re.findall(r"(?:[^\W_]|[\u0e00-\u0e7f])+", text))
 
 
-def cos_endpoint(settings: Settings) -> str:
-    return f"https://cos.{settings.cos_region}.myqcloud.com"
-
-
-async def start(lk: api.LiveKitAPI, settings: Settings, room_name: str, key: str) -> Recording:
+async def upload(settings: Settings, key: str, data: bytes, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    """Put the recording in the bucket (one signed S3 PUT)."""
     assert settings.cos_secret_id and settings.cos_secret_key and settings.cos_bucket and settings.cos_region
-    upload = api.S3Upload(
+    host = f"{settings.cos_bucket}.cos.{settings.cos_region}.myqcloud.com"
+    url = httpx.URL(f"https://{host}/{quote(key, safe='/')}")
+    now = dt.datetime.now(dt.UTC)
+    digest = hashlib.sha256(data).hexdigest()
+    headers = {
+        "host": host,
+        "content-type": "audio/ogg",
+        "x-amz-content-sha256": digest,
+        "x-amz-date": now.strftime("%Y%m%dT%H%M%SZ"),
+    }
+    headers["Authorization"] = sign_v4(
+        "PUT",
+        url,
+        headers,
+        digest,
         access_key=settings.cos_secret_id.get_secret_value(),
-        secret=settings.cos_secret_key.get_secret_value(),
+        secret_key=settings.cos_secret_key.get_secret_value(),
         region=settings.cos_region,
-        endpoint=cos_endpoint(settings),
-        bucket=settings.cos_bucket,
+        service="s3",
+        now=now,
     )
-    output = api.EncodedFileOutput(file_type=api.EncodedFileType.OGG, filepath=key, s3=upload)
-    info = await lk.egress.start_room_composite_egress(
-        api.RoomCompositeEgressRequest(room_name=room_name, audio_only=True, file_outputs=[output])
-    )
-    return Recording(info.egress_id, key)
-
-
-async def stop(lk: api.LiveKitAPI, recording: Recording) -> None:
-    """Finish the file now (it is uploaded when the egress ends); a room that already closed ended it."""
-    try:
-        await lk.egress.stop_egress(api.StopEgressRequest(egress_id=recording.egress_id))
-    except api.TwirpError as exc:
-        log.info("egress %s already ended (%s)", recording.egress_id, exc.code)
+    async with httpx.AsyncClient(timeout=30, transport=transport) as client:
+        res = await client.put(url, headers=headers, content=data)
+    if res.status_code != 200:
+        raise RuntimeError(f"COS refused the recording (HTTP {res.status_code})")
 
 
 def sign_v4(
