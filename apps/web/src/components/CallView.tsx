@@ -14,6 +14,14 @@ import { AlertIcon, CheckIcon, DownloadIcon, ListIcon, PhoneIcon, PhoneOffIcon }
 import { ResultView } from "./ResultView";
 import { Transcript } from "./Transcript";
 
+const RECORDING_LABEL: Record<string, string> = {
+  stored: "บันทึกเสียงแล้ว",
+  failed: "บันทึกเสียงไม่สำเร็จ",
+  declined: "ไม่บันทึกเสียง (ลูกค้าไม่ยินยอม)",
+  discarded: "ลบไฟล์เสียงแล้ว",
+  delete_failed: "ลบไฟล์เสียงไม่สำเร็จ ต้องลบเอง",
+};
+
 const TONE_ICON = { good: CheckIcon, warn: PhoneIcon, bad: AlertIcon, neutral: PhoneOffIcon };
 
 interface Props {
@@ -101,6 +109,7 @@ export function CallView({ api, call, onNewCall, onOpenDetail }: Props) {
             <span className="outcome-sub">
               {taskCount > 0 ? `มีงานติดตาม ${taskCount} รายการ` : "ไม่มีงานติดตาม"}
               {call.transcript_discarded ? " · ไม่เก็บบทสนทนาตามที่ลูกค้าขอ" : ""}
+              {call.recording ? ` · ${RECORDING_LABEL[call.recording.status] ?? call.recording.status}` : ""}
             </span>
           </div>
           <div className="outcome-actions">

@@ -100,6 +100,7 @@ export interface Call {
   cancel_requested: boolean;
   warnings?: string[];
   transcript_discarded?: boolean;
+  recording?: { key: string | null; status: "stored" | "failed" | "declined" | "discarded" | "delete_failed" };
   result?: CallResult;
   case?: Record<string, unknown>;
   transcript?: TranscriptTurn[];

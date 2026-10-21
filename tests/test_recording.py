@@ -5,6 +5,7 @@ import hashlib
 from typing import Any
 
 import httpx
+import numpy as np
 import pytest
 from httpx import AsyncClient
 from pydantic import SecretStr
@@ -93,30 +94,83 @@ async def test_an_objected_recording_is_deleted_from_the_bucket() -> None:
     )
 
 
-async def test_the_call_room_is_recorded_as_audio_into_the_bucket() -> None:
-    sent: list[Any] = []
+class Clock:
+    def __init__(self) -> None:
+        self.now = 100.0
 
-    class Egress:
-        async def start_room_composite_egress(self, request: Any) -> Any:
-            sent.append(request)
-            return type("Info", (), {"egress_id": "EG_1"})()
+    def __call__(self) -> float:
+        return self.now
 
-    lk = type("LK", (), {"egress": Egress()})()
+
+def tone(seconds: float, value: int = 1000, rate: int = 16_000) -> bytes:
+    return (np.full(int(seconds * rate), value, dtype=np.int16)).tobytes()
+
+
+def test_both_sides_are_laid_on_one_timeline_and_mixed() -> None:
+    clock = Clock()
+    rec = recording.CallRecorder(clock)
+    rec.bot(tone(1.0, 1000, 24_000), 24_000, plays_at=100.0)  # the greeting, 0-1 s
+    clock.now = 101.5
+    rec.customer(tone(0.5, 2000))  # "ครับ", heard 1.0-1.5 s
+    mixed = rec.mix()
+    assert len(mixed) == int(1.5 * 16_000)
+    assert mixed[8_000] == 1000 and mixed[20_000] == 2000 and mixed[-1] == 2000
+
+
+def test_bot_speech_cut_by_the_customer_is_not_in_the_recording() -> None:
+    clock = Clock()
+    rec = recording.CallRecorder(clock)
+    rec.bot(tone(4.0), 16_000, plays_at=100.0)
+    rec.cut_bot(101.0)  # the customer talked over it after a second
+    assert len(rec.mix()) == 16_000
+
+
+def test_a_declined_recording_keeps_nothing() -> None:
+    rec = recording.CallRecorder(Clock())
+    rec.customer(tone(1.0))
+    rec.discard()
+    rec.customer(tone(1.0))
+    rec.bot(tone(1.0), 16_000, plays_at=100.0)
+    assert rec.discarded and len(rec.mix()) == 0
+
+
+def test_the_recording_is_opus_in_ogg_of_the_right_length() -> None:
+    import io
+
+    import av
+
+    clock = Clock()
+    rec = recording.CallRecorder(clock)
+    rec.bot(tone(2.0), 16_000, plays_at=100.0)
+    data = rec.encode()
+    with av.open(io.BytesIO(data)) as container:
+        stream = container.streams.audio[0]
+        assert stream.codec_context.name == "opus"
+        seconds = sum(f.samples / f.sample_rate for f in container.decode(stream))
+    assert data[:4] == b"OggS" and abs(seconds - 2.0) < 0.1
+
+
+async def test_the_recording_is_uploaded_with_a_signed_put() -> None:
+    seen: list[httpx.Request] = []
+
+    def cos(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200)
+
     s = cos_settings()
-    rec = await recording.start(lk, s, "kpi-call-1", "kpi-voicebot/recordings/call-1.ogg")  # type: ignore[arg-type]
-    request = sent[0]
-    output = request.file_outputs[0]
-    assert rec == recording.Recording("EG_1", "kpi-voicebot/recordings/call-1.ogg")
-    assert (request.room_name, request.audio_only, output.filepath) == (
-        "kpi-call-1",
-        True,
-        "kpi-voicebot/recordings/call-1.ogg",
-    )
-    assert (output.s3.bucket, output.s3.region, output.s3.endpoint) == (
-        "kpi-recordings-1250000000",
-        "ap-bangkok",
-        "https://cos.ap-bangkok.myqcloud.com",
-    )
+    key = "kpi-voicebot/recordings/20-10-2026/สมชาย_ใจดี_pa_confirmation_101500_abcd1234.ogg"
+    await recording.upload(s, key, b"OggS...", transport=httpx.MockTransport(cos))
+    request = seen[0]
+    assert request.method == "PUT" and request.url.path == "/" + key and request.content == b"OggS..."
+    assert request.headers["content-type"] == "audio/ogg"
+    assert request.headers["Authorization"].startswith("AWS4-HMAC-SHA256 Credential=AKIDtest/")
+    assert request.headers["x-amz-content-sha256"] == hashlib.sha256(b"OggS...").hexdigest()
+
+
+async def test_a_refused_upload_is_an_error_not_silence() -> None:
+    s = cos_settings()
+    with pytest.raises(RuntimeError, match="HTTP 403"):
+        await recording.upload(s, "k.ogg", b"x", transport=httpx.MockTransport(lambda r: httpx.Response(403)))
 
 
 def answered_with(outcome_text: str) -> Any:
@@ -178,3 +232,74 @@ def test_recordings_are_filed_by_day_under_the_customers_name() -> None:
     key = recording.object_key(s, "dfd6321189fe4c8c", "สมชาย ใจดี", "pa_confirmation", at)
     assert key == "kpi-voicebot/recordings/20-10-2026/สมชาย_ใจดี_pa_confirmation_003005_dfd63211.ogg"
     assert recording.object_key(s, "c1", "a/b ../x", "", at).count("/") == 3  # a name never makes a folder
+
+
+async def test_a_failed_or_declined_recording_is_said_on_the_call(
+    client: AsyncClient, store: Store, settings: Settings
+) -> None:
+    def ended(**flags: bool) -> Any:
+        async def call(phone: FakePhone) -> CallEnd:
+            await phone.kw["on_answered"]()
+            phone.engine.start()
+            phone.engine.handle_hangup()
+            return CallEnd(DialResult.ANSWERED, True, "customer_hung_up", **flags)
+
+        return call
+
+    worker = Worker(store, settings, "w1")
+    failed = await queue_live_call(client)
+    worker.phone_factory = fake(ended(recording_failed=True))
+    await worker.process_once()
+    assert (await store.get_call(failed))["recording"] == {"key": None, "status": "failed"}
+
+    r = await client.post(
+        "/api/v1/calls",
+        json={
+            "campaign": "accident_survey",
+            "target_name": "สมชาย ใจดี",
+            "phone": "081-234-5678",
+            "mode": "live",
+            "source": {"type": "profile", "profile_id": "survey-surveyor"},
+        },
+        headers={"Idempotency-Key": "live-0003"},
+    )
+    declined = r.json()["call_id"]
+    worker.phone_factory = fake(ended(recording_declined=True))
+    await worker.process_once()
+    assert (await store.get_call(declined))["recording"] == {"key": None, "status": "declined"}
+
+
+async def test_the_call_uploads_its_recording_at_hang_up_or_says_it_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kpi_voicebot.telephony import PhoneCall
+
+    uploaded: list[str] = []
+
+    async def ok(_: Settings, key: str, data: bytes) -> None:
+        uploaded.append(key)
+
+    async def refused(_: Settings, key: str, data: bytes) -> None:
+        raise RuntimeError("COS refused the recording (HTTP 403)")
+
+    def call(declined: bool = False) -> Any:
+        phone = object.__new__(PhoneCall)
+        phone.settings, phone.recording_key, phone.console = cos_settings(), "k/20-10-2026/a.ogg", False
+        phone.sink, phone._end, phone.room_name = None, CallEnd(DialResult.ANSWERED, True), "kpi-test"
+        phone.recorder = recording.CallRecorder(Clock())
+        phone.recorder.customer(tone(1.0))
+        if declined:
+            phone.recorder.discard()
+        return phone
+
+    monkeypatch.setattr(recording, "upload", ok)
+    phone = call()
+    await phone._save_recording()
+    assert phone._end.recording_key == "k/20-10-2026/a.ogg" and uploaded == ["k/20-10-2026/a.ogg"]
+
+    phone = call(declined=True)
+    await phone._save_recording()
+    assert phone._end.recording_key is None and len(uploaded) == 1  # nothing kept, nothing uploaded
+
+    monkeypatch.setattr(recording, "upload", refused)
+    phone = call()
+    await phone._save_recording()
+    assert phone._end.recording_failed and phone._end.recording_key is None

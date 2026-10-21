@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 import logging
 import sys
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -33,7 +34,7 @@ from kpi_voicebot.dialogue import AsyncInterpreter, Dialogue
 from kpi_voicebot.engine import BaseEngine
 from kpi_voicebot.models import DialResult, Outcome
 from kpi_voicebot.playback import VoicePlayer
-from kpi_voicebot.recording import Recording
+from kpi_voicebot.recording import CallRecorder
 from kpi_voicebot.responder import Responder
 from kpi_voicebot.simulator import Canceled, Sink
 from kpi_voicebot.voice_session import VoiceSession, asr_context
@@ -103,8 +104,8 @@ class CallEnd:
     sip_reason: str | None = None
     timings: list[float] = field(default_factory=list)
     recording_key: str | None = None  # where the call's audio was uploaded (Tencent COS)
-    recording_declined: bool = False  # the customer declined: audio deleted, transcript kept
-    recording_delete_failed: bool = False
+    recording_declined: bool = False  # the customer declined: no audio kept, transcript kept
+    recording_failed: bool = False  # it should have been recorded but the file could not be made or stored
 
 
 class RoomOut:
@@ -114,10 +115,14 @@ class RoomOut:
         self.source = rtc.AudioSource(rate, 1, queue_size_ms=OUT_QUEUE_MS)
         self.rate = rate
         self.latency = OUT_QUEUE_MS / 1000
+        self.recorder: CallRecorder | None = None  # set while the call is recorded
 
     async def write(self, pcm: bytes) -> None:
         samples = len(pcm) // 2
         if samples:
+            if self.recorder is not None:
+                # Heard once the audio already queued ahead of it has played.
+                self.recorder.bot(pcm, self.rate, time.monotonic() + float(self.source.queued_duration))
             await self.source.capture_frame(rtc.AudioFrame(pcm[: samples * 2], self.rate, 1, samples))
 
     def unplayed_seconds(self) -> float:
@@ -125,6 +130,8 @@ class RoomOut:
 
     async def interrupt(self) -> None:
         self.source.clear_queue()
+        if self.recorder is not None:
+            self.recorder.cut_bot(time.monotonic())  # what was still queued was never heard
 
     async def drain(self) -> None:
         await self.source.wait_for_playout()
@@ -186,7 +193,7 @@ class PhoneCall:
         self.room_name = room_name
         self.sip_call_to = sip_call_to
         self.recording_key = recording_key
-        self.recording: Recording | None = None
+        self.recorder: CallRecorder | None = None
         self._lk: api.LiveKitAPI | None = None
         self._end: CallEnd | None = None
         if hasattr(engine, "on_recording_declined"):
@@ -277,15 +284,14 @@ class PhoneCall:
             if self.on_answered is not None:
                 await self.on_answered()
             self._lk, self._end = lk, end
-            await self._start_recording(lk, end)
+            self._start_recording(out)
             return await self._converse(end, front, player, asr)
         finally:
-            if self.recording is not None:
-                await recording.stop(lk, self.recording)
             await self._hang_up(lk)
             await asyncio.gather(front.close(), asr.close(), player.close(), return_exceptions=True)
             with contextlib.suppress(Exception):
                 await self.room.disconnect()
+            await self._save_recording()
 
     async def _dial(self, lk: api.LiveKitAPI) -> CallEnd:
         settings = self.settings
@@ -357,14 +363,15 @@ class PhoneCall:
             session.hang_up()
             track = None
         pump = asyncio.ensure_future(self._pump(track, session)) if track is not None else None
+        tape = asyncio.ensure_future(self._record_customer(track)) if track is not None and self.recorder else None
         watch = asyncio.ensure_future(self._watch_link())
+        tasks = [t for t in (pump, tape, watch) if t is not None]
         try:
             await session.run()
         finally:
-            for task in (pump, watch):
-                if task is not None:
-                    task.cancel()
-            await asyncio.gather(*(t for t in (pump, watch) if t is not None), return_exceptions=True)
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         end.timings = session.turn_timings
         if not end.end_reason:
             end.end_reason = "customer_hung_up" if self.customer_left.is_set() else "conversation_complete"
@@ -392,37 +399,47 @@ class PhoneCall:
         finally:
             await stream.aclose()
 
-    async def _discard_recording(self) -> None:
-        """The customer declined the recording: stop it now and delete the file; the call goes on."""
-        end, rec = self._end, self.recording
-        if end is not None:
-            end.recording_declined = True
-        if rec is None or self._lk is None:
-            return
-        self.recording = None
-        await recording.stop(self._lk, rec)
+    async def _record_customer(self, track: rtc.Track) -> None:
+        """The customer's side as it came down the line (before noise reduction, which is only for the
+        recogniser), into the recording."""
+        stream = rtc.AudioStream(track, sample_rate=recording.RATE, num_channels=1, frame_size_ms=20)
         try:
-            await recording.delete(self.settings, rec.key)
-        except Exception:
-            log.exception("could not delete the declined recording %s", rec.key)
-            if end is not None:
-                end.recording_delete_failed = True
-            return
-        if end is not None:
-            end.recording_key = None
-        self._note("ลูกค้าไม่ยินยอมให้บันทึกเสียง: หยุดบันทึกและลบไฟล์เสียงแล้ว (ยังบันทึกข้อความ)")
+            async for event in stream:
+                if self.recorder is not None:
+                    self.recorder.customer(bytes(event.frame.data))
+        finally:
+            await stream.aclose()
 
-    async def _start_recording(self, lk: api.LiveKitAPI, end: CallEnd) -> None:
-        """Record from the answer on. A recording that fails to start never stops the call."""
+    async def _discard_recording(self) -> None:
+        """The customer declined the recording: keep no audio from here on or before; the call goes on."""
+        if self._end is not None:
+            self._end.recording_declined = True
+        if self.recorder is not None:
+            self.recorder.discard()
+        self._note("ลูกค้าไม่ยินยอมให้บันทึกเสียง: ไม่เก็บไฟล์เสียง (ยังบันทึกข้อความ)")
+
+    def _start_recording(self, out: RoomOut) -> None:
+        """Record from the answer on, in this worker (both sides are already here)."""
         if not self.recording_key or not self.settings.recording_enabled:
             return
-        try:
-            self.recording = await recording.start(lk, self.settings, self.room_name, self.recording_key)
-        except api.TwirpError as exc:
-            self._note(f"เริ่มบันทึกเสียงไม่ได้: {exc.code}")
+        self.recorder = out.recorder = CallRecorder()
+        self._note("บันทึกเสียงการสนทนา (อัปโหลดไป COS เมื่อจบสาย)")
+
+    async def _save_recording(self) -> None:
+        """After hang-up: mix, encode and upload. A failure is marked on the call, never silent."""
+        recorder, end = self.recorder, self._end
+        if recorder is None or end is None or recorder.discarded or not self.recording_key:
             return
-        end.recording_key = self.recording.key
-        self._note(f"บันทึกเสียงไปที่ COS: {self.recording.key}")
+        try:
+            data = await asyncio.to_thread(recorder.encode)
+            await recording.upload(self.settings, self.recording_key, data)
+        except Exception as exc:
+            log.exception("could not store the recording %s", self.recording_key)
+            end.recording_failed = True
+            self._note(f"บันทึกเสียงไม่สำเร็จ: {type(exc).__name__}")
+            return
+        end.recording_key = self.recording_key
+        self._note(f"บันทึกเสียงไปที่ COS: {self.recording_key} ({recorder.seconds:.0f} วินาที, {len(data) // 1024} KB)")
 
     def _enhancer(self) -> rtc.FrameProcessor[rtc.AudioFrame] | None:
         """ai-coustics QUAIL_VF_S, the inbound voicebot's setting (LiveKit Cloud authorises it with the
