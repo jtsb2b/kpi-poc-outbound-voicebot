@@ -14,7 +14,7 @@ from kpi_voicebot import voice_session
 from kpi_voicebot.asr import ASREvent
 from kpi_voicebot.config import Settings
 from kpi_voicebot.dialogue import Dialogue
-from kpi_voicebot.models import DialResult, Directive
+from kpi_voicebot.models import DialResult, Directive, Segment
 from kpi_voicebot.simulator import build_engine
 from kpi_voicebot.store import Store
 from kpi_voicebot.telephony import CallEnd, classify_sip
@@ -334,3 +334,46 @@ async def test_a_number_that_asked_not_to_be_called_is_not_called_again(
     )
     r = await client.post("/api/v1/calls", json=live_body(), headers={"Idempotency-Key": "live-dnc-02"})
     assert (r.status_code, r.json()["detail"]) == (409, "ลูกค้าเบอร์นี้ขอไม่ให้ติดต่อกลับ (ภายใน 6 เดือน)")
+
+
+async def test_a_cut_off_with_no_words_after_it_carries_on_from_the_cut_sentence(monkeypatch: Any) -> None:
+    """2 Nov B2B test: a noise stopped the bot, nothing was said, and the caller heard half a sentence."""
+    monkeypatch.setattr(voice_session, "FALSE_BARGE_WAIT", 0.2)
+    player, asr, sink, front = FakePlayer(seconds=0.5), FakeASR(), Recorder(), FakeFront()
+    session, _engine = phone_session(player, asr, sink, front, greet_on_answer=False)
+
+    async def noise() -> None:
+        await wait_until(lambda: player.speaking)
+        front.sustained = 1.0  # a noise long enough for the voice detector
+        await wait_until(lambda: not player.speaking)
+        front.sustained = 0.0
+        await wait_until(lambda: len(player.played) == 2)  # spoken again, not left hanging
+        await wait_until(lambda: not player.speaking)
+        session.hang_up()
+
+    talk = asyncio.ensure_future(noise())
+    await asyncio.wait_for(session.run(), 5)
+    await talk
+    assert player.played[0] == player.played[1]
+    assert sink.turns[0] == ("bot", "greet", True)  # in the end it was all heard
+
+
+async def test_the_goodbye_is_never_cut_and_the_line_stays_up_until_it_is_heard(monkeypatch: Any) -> None:
+    monkeypatch.setattr(voice_session, "HANGUP_TAIL", 0.3)
+    player, asr, sink = FakePlayer(seconds=0.4), FakeASR(), Recorder()
+    session, _engine = phone_session(player, asr, sink, greet_on_answer=False)
+    goodbye = Directive(key="close", segments=[Segment(text="ขอบพระคุณค่ะ สวัสดีค่ะ")], end_call=True)
+    session.dialogue.start = lambda: goodbye  # type: ignore[method-assign]
+
+    async def customer() -> None:
+        await wait_until(lambda: player.speaking)
+        asr.say("partial", "ขอบคุณครับ สวัสดีครับ")  # said over the goodbye
+        await asyncio.sleep(0.1)
+        assert player.speaking
+
+    talk = asyncio.ensure_future(customer())
+    started = time.monotonic()
+    await asyncio.wait_for(session.run(), 5)
+    await talk
+    assert sink.turns[0] == ("bot", "close", True)
+    assert time.monotonic() - started >= 0.7  # 0.4 s of goodbye, then the tail before hanging up

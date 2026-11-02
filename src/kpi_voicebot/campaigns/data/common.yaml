@@ -48,6 +48,10 @@ wording:
   system_unavailable_close:
     status: poc_approved
     segments: ["ต้องขออภัยค่ะ ขณะนี้ระบบขัดข้องชั่วคราว ดิฉันขออนุญาตให้เจ้าหน้าที่ติดต่อกลับภายหลังนะคะ ขอบพระคุณค่ะ สวัสดีค่ะ"]
+  # Said after a closing turn that has no goodbye in it, so the line never goes dead mid-thought.
+  farewell:
+    status: poc_approved
+    segments: ["ขอบพระคุณมากค่ะ สวัสดีค่ะ"]
   thanks_for_time:
     status: poc_approved
     segments: ["ขอบพระคุณค่ะ"]

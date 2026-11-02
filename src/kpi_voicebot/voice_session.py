@@ -45,6 +45,11 @@ ANSWER_SETTLE = 0.3  # phone: let the media path open after the answer, then gre
 LINE_READY_WAIT = 2.0  # longest the greeting waits for the customer's audio to start arriving
 MAX_RETHINK = 3  # replies started again because the customer was still talking
 PICKUP_WINDOW = 1.2  # a hello committed this soon after the greeting was said over it
+# After the goodbye has left the worker, LiveKit, the SIP route and the phone network still hold part of it:
+# hanging up at once cut "สวัสดีค่ะ" to "สวัส" (2 Nov B2B test).
+HANGUP_TAIL = 1.2
+# A cut-off with no words recognised this long after it was noise, breath or "อืม": carry on talking.
+FALSE_BARGE_WAIT = 1.5
 _HELLO = re.compile(r"ฮัลโหล|ฮัลโล|ฮัลโหลว|สวัสดี|ครับผม|ครับ|ค่ะ|คะ|จ้ะ|จ้า|ว่าไง|ใครพูด|ใครคะ|ใครครับ|[\s,.!?…]")
 
 
@@ -114,6 +119,7 @@ class VoiceSession:
         self.greet_on_answer = greet_on_answer
         self.line_ready = line_ready  # set when the customer's audio starts arriving (phone)
         self.greeting = False  # the opening line is playing
+        self.closing = False  # the goodbye is playing: never cut ("ขอบคุณครับ" over it stopped it mid-word)
         self.greeting_ended_at = 0.0
         self.sink = sink
         self.console = console
@@ -181,6 +187,7 @@ class VoiceSession:
                 self.full_duplex
                 and self.vad_barge_in
                 and not self.greeting  # "ฮัลโหล สวัสดีครับ" over the greeting is not cutting in
+                and not self.closing
                 and self.player.speaking
                 and self.front.speech_seconds() >= BARGE_IN_SPEECH
             ):
@@ -203,11 +210,25 @@ class VoiceSession:
             if (
                 self.full_duplex
                 and self.player.speaking
+                and not self.closing
                 and is_barge_in(heard)
                 and not self._is_echo(heard)
                 and not own_voice
             ):
                 self.barge.set()
+
+    async def _only_noise(self) -> bool:
+        """After a cut-off: True when no real words follow within `FALSE_BARGE_WAIT` (nothing, the bot's own
+        echo, or just "ครับ / อืม"); False as soon as the customer is saying something."""
+        deadline = time.monotonic() + FALSE_BARGE_WAIT
+        while time.monotonic() < deadline:
+            if self.gone.is_set():
+                return False
+            heard = self.collector.heard
+            if is_barge_in(heard) and not self._is_echo(heard) and not echo_of(heard, self.speaking_text):
+                return False
+            await asyncio.sleep(0.05)
+        return not self.gone.is_set() and not is_barge_in(self.collector.heard)
 
     async def _watch_cancel(self) -> None:
         if self.is_canceled is None:
@@ -313,6 +334,7 @@ class VoiceSession:
             if self.gone.is_set():
                 self.barge.set()
             self.speaking_text = directive.text
+            self.closing = directive.end_call
             if not self.full_duplex:
                 self.collector.reset()  # nothing the speakers fed back belongs to the next turn
             played = await self.player.play(directive, len(directive.segments), waited_from, self.barge)
@@ -322,12 +344,25 @@ class VoiceSession:
             self.previous_text = directive.text
             cut = self.barge.is_set()
             heard = segments_heard(directive, played) if cut else len(directive.segments)
+            if cut and not self.gone.is_set() and heard < len(directive.segments) and await self._only_noise():
+                # Stopped for something that was not the customer talking (a noise, a breath, "อืม"): the
+                # bot went quiet and the caller, who heard half a sentence, asked "ว่ายังไงนะครับ" (2 Nov B2B
+                # test, five times in one call). Say the rest, once, from the sentence that was cut.
+                await self._event("false_interruption", {"after_segments": heard})
+                self.collector.reset()
+                rest = directive.model_copy(update={"segments": directive.segments[heard:]})
+                self.barge.clear()
+                played = await self.player.play(rest, len(rest.segments), time.monotonic(), self.barge)
+                cut = self.barge.is_set()
+                heard += segments_heard(rest, played) if cut else len(rest.segments)
             engine.report_delivery(heard, not cut)
             if self.sink is not None:
                 await self.sink.bot(directive, heard, not cut)
             if self.gone.is_set():
                 break
             if directive.end_call:
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(self.gone.wait(), HANGUP_TAIL)  # let the goodbye reach the caller
                 return
             turn = await self._pickup_words(await self._next_turn())
             while turn is not None and self._is_echo(turn):
