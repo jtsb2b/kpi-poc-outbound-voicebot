@@ -240,6 +240,10 @@ _AFFIRM_START = (
     "เชิญ",
     "ว่ามา",
     "พูดอยู่",
+    "พูดสาย",  # "พูดสายอยู่ครับ": yes, speaking (2 Nov B2B test: asked "is this Khun …?" twice)
+    "ผู้สาย",  # how the recogniser often hears "พูดสาย" on the phone
+    "สายอยู่",
+    "กำลังพูด",
     "แม่น",
     "เออ",
     "อือ",

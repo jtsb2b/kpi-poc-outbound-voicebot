@@ -131,3 +131,46 @@ def test_a_yes_to_the_recording_still_counts_when_a_question_follows() -> None:
 
     assert _consents("ยินยอมครับ ขี่มอเตอร์ไซค์คุ้มครองไหมครับ")
     assert not _consents("บันทึกเสียงทำไมครับ")
+
+
+async def test_speaking_on_the_line_confirms_who_we_are_talking_to() -> None:
+    a, _ = agent("repair-honda-city", [NEXT] * 3)
+    a.start()
+    a.last_reply = ["สวัสดีค่ะ ติดต่อจากบริษัทกรุงไทยพานิชประกันภัยนะคะ ขอเรียนสายคุณสมชาย ใจดี เกี่ยวกับรถทะเบียน 2ขค 5678 ค่ะ"]
+    await a.reply("พูดสายอยู่ครับ")  # 2 Nov B2B test: asked "is this Khun …?" a second time
+    assert a.check.identity == "confirmed"
+
+
+async def test_a_closing_turn_without_a_goodbye_gets_one() -> None:
+    close = "SAY: ขอบคุณที่แจ้งนะคะ ดิฉันขออนุญาตให้เจ้าหน้าที่ตรวจสอบเรื่องนี้นะคะ\nUPDATE: car1 not_at_garage\nEND: completed"
+    a, _ = garage_ready("garage-one-car", [close])
+    a.last_reply = ["รบกวนตรวจสอบรถทะเบียน 4กง 3456 สมุทรปราการ ให้หน่อยนะคะ ว่าขณะนี้ซ่อมเสร็จเรียบร้อยแล้วหรือยังคะ"]
+    directive = await a.reply("ไม่มีรถคันนี้ที่อู่ครับ")
+    assert directive.end_call and directive.text.endswith("สวัสดีค่ะ")
+
+
+async def test_an_english_name_is_said_the_thai_way() -> None:
+    from kpi_voicebot.agent import CallAgent
+    from kpi_voicebot.campaigns import get_profile
+    from kpi_voicebot.simulator import build_engine
+    from tests.test_agent import FakeModel
+
+    p = get_profile("repair-honda-city")
+    assert p is not None
+    model = FakeModel(["คาลี นีโกรว", "SAY: สวัสดีค่ะ ขอเรียนสายคุณคาลี นีโกรว เกี่ยวกับรถทะเบียน 2ขค 5678 นนทบุรี ค่ะ\nEND: none"])
+    a = CallAgent(build_engine(p.campaign, p.case, "Kallee Kneegrow"), model)  # type: ignore[arg-type]
+    await a.prepare_opening()
+    assert a.vars["customer_name"] == "คาลี นีโกรว" and a.vars["customer_first"] == "คาลี"
+    assert "Kallee" not in a.start().text
+
+
+async def test_the_scale_explanation_does_not_move_a_score_to_another_question() -> None:
+    a, _ = agent("survey-surveyor", [NEXT])
+    a.start()
+    a.check.identity, a.check.ai_disclosed, a.check.available = "confirmed", True, True
+    a.check.notice, a.check.consent = True, "granted"
+    a.last_reply = [
+        "ในเรื่องความสะดวกในการติดต่อศูนย์รับแจ้งอุบัติเหตุ คุณลูกค้าให้กี่คะแนนดีคะ โดย 5 คะแนนคือพึงพอใจมากที่สุด และ 1 คะแนนคือพึงพอใจน้อยที่สุดค่ะ"
+    ]
+    await a.reply("5 คะแนนครับ")
+    assert a.check.status["q1"] == "5" and a.check.status["q2"] == "pending"

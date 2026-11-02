@@ -313,6 +313,7 @@ def tidy(lines: list[str]) -> list[str]:
     return out
 
 
+_FAREWELL = re.compile(r"สวัสดี(ค่ะ|นะคะ)|ขอให้มีวันที่ดี")
 _CAR_STATUSES = {
     "repaired",
     "in_repair",
@@ -378,10 +379,20 @@ def _asks_anything(lines: list[str]) -> bool:
 _FILLER = re.compile(r"ในเรื่อง|แล้ว|และ|คุณลูกค้า|ให้กี่คะแนนดีคะ|ให้กี่คะแนน|ดีคะ|\(.*?\)")
 
 
+# How the scale is explained ("โดย 5 คะแนนคือพึงพอใจมากที่สุด และ 1 คะแนนคือพึงพอใจน้อยที่สุด", "จาก 1 ถึง 5"):
+# not what is asked. Its "พึงพอใจ" matched q2 "ความพึงพอใจโดยรวม…" at the end of q1's question, and q1's
+# score landed on q2 (2 Nov B2B test: asked 2, 3, 4, 5, then 1).
+_SCALE_TALK = re.compile(
+    r"(โดย|ซึ่ง)?\s*\d+\s*(คะแนน)?\s*(คือ|หมายถึง|แปลว่า)[^,]*?(ที่สุด|แน่นอน|เลย)(ค่ะ|คะ)?"
+    r"|(จาก|ระหว่าง|ตั้งแต่)\s*\d+\s*(ถึง|-)\s*\d+\s*(คะแนน)?"
+)
+
+
 def _item_fit(item: Item, text: str) -> tuple[float, int]:
     """How well the text asks this question: by its label or by its approved wording without the words
     every question shares (q5's label "ประสบการณ์การบริการของกรุงไทยพานิช…" never matched how it is asked,
     "ประสบการณ์ที่ได้รับจากการบริการในครั้งนี้")."""
+    text = _SCALE_TALK.sub(" ", text)
     return max(_label_fit(item.label, text), _label_fit(_FILLER.sub(" ", item.approved), text))
 
 
@@ -481,6 +492,7 @@ class CallAgent:
 
     async def prepare_opening(self) -> None:
         """The greeting in the model's own words, worked out while the phone rings."""
+        await self._thai_name()
         name = self.vars.get("customer_name")
         prompt = f"(ลูกค้าเพิ่งรับสาย ยังไม่ได้พูด) ทักทายสั้นๆ อย่างสุภาพ และขออนุญาตเรียนสายกับคุณ{name} ห้ามพูดเรื่องกรมธรรม์"
         if self.campaign.party == "garage":
@@ -502,6 +514,22 @@ class CallAgent:
         named = _flat(str(name).split(" ")[0]) in _flat(" ".join(lines))
         if lines and not self.problem({"reply": lines}, "") and named:
             self.opening = lines
+
+    async def _thai_name(self) -> None:
+        """A name in English ("Kallee Kneegrow") written the way a Thai agent says it ("คาลี นีโกรว"): the Thai
+        voice spelled it letter by letter (2 Nov B2B test). The call record keeps the name as entered."""
+        name = str(self.vars.get("customer_name") or "")
+        if not re.search(r"[A-Za-z]", name):
+            return
+        prompt = f"เขียนชื่อคนต่อไปนี้เป็นอักษรไทยตามเสียงอ่านที่คนไทยพูด ตอบเฉพาะชื่อที่เขียนเป็นภาษาไทย ไม่ต้องมีคำว่าคุณ ไม่ต้องอธิบาย: {name}"
+        try:
+            text, _ = await self.client.chat_text([{"role": "user", "content": prompt}], max_tokens=40, temperature=0)
+        except LLMError:
+            return
+        thai = re.sub(r"\s+", " ", text.strip().splitlines()[0] if text.strip() else "").strip(" .\"'")
+        thai = re.sub(r"^คุณ", "", thai)
+        if thai and re.fullmatch(r"[\u0E00-\u0E7F ]{2,60}", thai):
+            self.vars["customer_name"], self.vars["customer_first"] = thai, thai.split(" ")[0]
 
     def report_delivery(self, spoken_segments: int, complete: bool) -> None:
         heard = self.last_reply if complete else self.last_reply[:spoken_segments]
@@ -691,6 +719,9 @@ class CallAgent:
             self.decline_ack_due = False
             if not any("บันทึกเสียง" in line for line in lines):
                 lines = [self._line("recording_declined"), *lines]
+        if out.get("end_call") and not _FAREWELL.search(" ".join(lines)):
+            # "ขอบคุณที่แจ้งนะคะ ให้เจ้าหน้าที่ตรวจสอบนะคะ" and the line went dead (2 Nov B2B test): say goodbye.
+            lines = [*lines, self._line("farewell")]
         return self._say(lines, "turn", end=bool(out.get("end_call")))
 
     def _settle_by_rules(self, customer: str) -> None:

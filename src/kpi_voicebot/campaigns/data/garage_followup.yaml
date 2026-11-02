@@ -39,6 +39,9 @@ wording:
   closing:
     status: poc_approved
     segments: ["ขอบคุณมากค่ะ สวัสดีค่ะ"]
+  farewell:
+    status: poc_approved
+    segments: ["ขอบคุณมากค่ะ สวัสดีค่ะ"]
   wrong_person_close:
     status: poc_approved
     segments: ["ขออภัยที่รบกวนค่ะ ดิฉันน่าจะโทรผิดเบอร์ ขอบคุณค่ะ สวัสดีค่ะ"]
