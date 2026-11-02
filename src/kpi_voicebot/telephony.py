@@ -43,7 +43,9 @@ log = logging.getLogger("kpi.phone")
 
 BOT_IDENTITY = "kpi-bot"
 CUSTOMER_IDENTITY = "customer"
-OUT_QUEUE_MS = 400  # audio queued ahead in LiveKit; small, so a barge-in silences the bot quickly
+# Audio queued ahead in LiveKit: headroom against any pause in the worker (a dry queue is a gap the caller
+# hears). A barge-in still silences the bot at once: `interrupt` clears the queue.
+OUT_QUEUE_MS = 1000
 LINE_DELAY_MS = 120  # starting guess of the echo path for the echo canceller (it adapts)
 
 
@@ -194,6 +196,7 @@ class PhoneCall:
         self.sip_call_to = sip_call_to
         self.recording_key = recording_key
         self.recorder: CallRecorder | None = None
+        self.line_ready = asyncio.Event()  # the customer's audio has started arriving
         self._lk: api.LiveKitAPI | None = None
         self._end: CallEnd | None = None
         if hasattr(engine, "on_recording_declined"):
@@ -349,6 +352,7 @@ class PhoneCall:
             # ("สะดวกครับ" right after the bot said "สะดวกคุยไหมคะ").
             echo_guard=False,
             greet_on_answer=True,
+            line_ready=self.line_ready,
             sink=self.sink,
             console=self.console,
             is_canceled=self.is_canceled,
@@ -395,6 +399,7 @@ class PhoneCall:
         )
         try:
             async for event in stream:
+                self.line_ready.set()
                 session.feed(bytes(event.frame.data))
         finally:
             await stream.aclose()

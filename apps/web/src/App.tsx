@@ -116,9 +116,9 @@ function Console({ api, onLogout }: { api: Api; onLogout: () => void }) {
             </button>
           </nav>
           <div className="topbar-actions">
-            {status && !status.live_calls_enabled && (
-              <span className="mode-chip" title={status.interpreter === "llm" ? "เข้าใจคำตอบด้วย Qwen" : "เข้าใจคำตอบด้วยกฎ"}>
-                โหมดจำลอง{status.interpreter === "llm" ? " · Qwen" : ""}
+            {status && !status.telephony_ready && (
+              <span className="mode-chip" title="ตั้งค่า LIVE_CALLS_ENABLED และระบบโทรศัพท์ใน .env">
+                ยังไม่เปิดโทรจริง
               </span>
             )}
             <ThemeToggle />

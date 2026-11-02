@@ -38,8 +38,10 @@ from kpi_voicebot.simulator import build_engine
 OC = Outcome
 Check = Callable[["Call"], str | None]
 
+INTERRUPT = "[INT]"  # a scripted line said over the bot's turn (only its first half was heard)
+
 CUSTOMER = (
-    "คุณกำลังแสดงเป็นลูกค้าคนไทยที่รับโทรศัพท์จากบริษัทประกัน (ผู้โทรเป็น AI ผู้ช่วย) {persona}\n"
+    "คุณกำลังแสดงเป็น{who}ที่รับโทรศัพท์จากบริษัทประกัน (ผู้โทรเป็น AI ผู้ช่วย) {persona}\n"
     "พูดแบบคนไทยคุยโทรศัพท์จริง สั้นๆ หนึ่งหรือสองประโยค ใช้ ครับ ตอบเฉพาะสิ่งที่ลูกค้าพูดออกมา "
     "ไม่ต้องมีเครื่องหมายคำพูด ไม่ต้องบรรยาย ถ้าบอทถามสิ่งที่บทบาทไม่ได้บอก ให้ตอบตามปกติแบบคนทั่วไป "
     "คุยไปจนกว่าบอทจะลาเอง ทำตามบทบาทเท่านั้น: ถ้าบทบาทบอกว่าข้อมูลถูกต้อง ห้ามแย้งหรือแต่งว่าข้อมูลผิด"
@@ -85,6 +87,7 @@ class Scenario:
     outcomes: set[Outcome] = field(default_factory=set)
     checks: list[Check] = field(default_factory=list)
     garbled: bool = False  # the customer's words are hard to make out: "เสียงไม่ชัด" is fair
+    who: str = "ลูกค้าคนไทย"  # who answers, for the customer model ("เจ้าหน้าที่อู่ซ่อมรถ" for a garage)
     max_turns: int = 26
 
 
@@ -103,6 +106,25 @@ def only_disputed(*names: str) -> Check:
     def check(c: Call) -> str | None:
         disputed = sorted(f.field for f in c.agent.result.policy_fields if f.status in ("disputed", "unclear"))
         return None if disputed == sorted(names) else f"disputed/unclear {disputed}, expected {sorted(names)}"
+
+    return check
+
+
+def cars_are(*expected: str) -> Check:
+    def check(c: Call) -> str | None:
+        got = [v.status for v in c.agent.result.vehicles]
+        return None if got == list(expected) else f"cars {got}, expected {list(expected)}"
+
+    return check
+
+
+def car_has(index: int, *fields: str) -> Check:
+    """The car's dates were noted (completion, appointment, pickup)."""
+
+    def check(c: Call) -> str | None:
+        row = c.agent.result.vehicles[index]
+        missing = [f for f in fields if not getattr(row, f"{f}_text")]
+        return f"car {index + 1} has no {missing}" if missing else None
 
     return check
 
@@ -145,7 +167,8 @@ def scores_are(**expected: Any) -> Check:
 
 def follow_up_or_hotline(c: Call) -> str | None:
     """An unanswerable question: noted for staff to call back, or the customer given the hotline."""
-    if "question_follow_up" in c.task_types() or "02-624-1111" in c.bot_text:
+    staff = {"question_follow_up", "claim_dispute", "complaint", "urgent"}
+    if staff & set(c.task_types()) or "02-624-1111" in c.bot_text:
         return None
     return "neither a follow-up for staff nor the hotline"
 
@@ -222,8 +245,8 @@ def name_in_introduction(c: Call) -> str | None:
 
 @general
 def introduced_once(c: Call) -> str | None:
-    asked = any(re.search(r"AI|เอไอ|หุ่นยนต์|คนจริง|บอท", t) for w, t in c.turns if w == "customer")
-    intros = [t for t in c.bot if re.search(r"(ดิฉัน|ดิฉันเป็น|ดิฉันชื่อ)\s*(น้องเคพีไอ)?\s*,?\s*(ผู้ช่วย AI|AI ผู้ช่วย)", t)]
+    asked = any(re.search(r"AI|เอไอ|หุ่นยนต์|คนจริง|บอท|ชื่ออะไร|ใครพูด|ใคร", t) for w, t in c.turns if w == "customer")
+    intros = [t for t in c.bot if "น้องเคพีไอ" in t]
     return None if asked or len(intros) <= 1 else f"introduced {len(intros)} times"
 
 
@@ -256,6 +279,27 @@ def turn_length(c: Call) -> str | None:
 def reply_time(c: Call) -> str | None:
     slow = [s for s in c.reply_seconds if s > 6]
     return f"{len(slow)} repl(ies) over 6 s (max {max(slow):.1f})" if slow else None
+
+
+@general
+def no_apology_loop(c: Call) -> str | None:
+    """22 Oct team test: every interruption opened with "ขออภัยค่ะ" and the same topic, heard as a loop."""
+    sorry = re.compile(r"^(ต้อง)?(ขออภัย|ขอโทษ)")
+    for a, b in zip(c.bot, c.bot[1:], strict=False):
+        if sorry.match(a) and sorry.match(b):
+            return f"apologised two turns running: {b[:70]}"
+    return None
+
+
+@general
+def no_restart_after_interruption(c: Call) -> str | None:
+    """After being cut off, carry on with what was not heard; never say the heard part again."""
+    for a, b in zip(c.bot, c.bot[1:], strict=False):
+        if a.endswith("⟂"):
+            heard = a.removesuffix("⟂").strip()
+            if len(heard) >= 20 and heard[:40] in b:
+                return f"repeated what the customer already heard: {heard[:60]}"
+    return None
 
 
 @general
@@ -534,6 +578,49 @@ SCENARIOS: list[Scenario] = [
         "คุณชื่อสมชาย ยินยอมบันทึกเสียง หลังทวนความคุ้มครอง ให้บอกว่า 'ผมอยากยกเลิกกรมธรรม์นี้ครับ ทำยังไง'",
         outcomes={OC.POLICY_CONFIRMED, OC.POLICY_PARTIAL, OC.CONFIRMED_WITH_DISCREPANCY, OC.REFUSED},
     ),
+    # --- PA: interruptions (scripted; [INT] = said over the bot's turn) ---
+    Scenario(
+        "pa_interrupt_premium",
+        "pa-email",
+        "cuts in during the coverage reading to ask about the premium",
+        script=[
+            "ใช่ครับ",
+            "สะดวกครับ",
+            "ยินยอมครับ",
+            "[INT] เดี๋ยวนะครับ เบี้ยเท่าไหร่นะ",
+            "ครับ",
+            "ถูกต้องครับ",
+            "[INT] จ่ายยังไงนะครับ",
+            "ครับ ถูกต้อง",
+            "ใช่ครับ",
+            "ถูกต้องครับ",
+            "รับทราบครับ",
+            "ไม่มีครับ",
+        ],
+        outcomes={OC.POLICY_CONFIRMED, OC.CONFIRMED_WITH_DISCREPANCY},
+        garbled=True,
+    ),
+    Scenario(
+        "pa_interrupt_repeated",
+        "pa-email",
+        'cuts in several times running ("อะไรนะ", "ชื่ออะไร") as on a choppy line',
+        script=[
+            "ครับผม",
+            "[INT] อะไรนะ",
+            "[INT] ไม่ ผมถามว่าคุณชื่ออะไร",
+            "อ๋อ ครับ สะดวกครับ",
+            "ยินยอมครับ",
+            "[INT] รู้จักยังไง",
+            "ครับ ถูกต้อง",
+            "ถูกต้องครับ",
+            "ใช่ครับ",
+            "ถูกต้องครับ",
+            "รับทราบครับ",
+            "ไม่มีครับ",
+        ],
+        outcomes={OC.POLICY_CONFIRMED, OC.CONFIRMED_WITH_DISCREPANCY, OC.POLICY_PARTIAL},
+        garbled=True,
+    ),
     # --- PA: silence (scripted) ---
     Scenario(
         "pa_silent", "pa-email", "never says anything", script=[None, None, None, None, None], outcomes={OC.NO_RESPONSE}
@@ -694,6 +781,166 @@ SCENARIOS: list[Scenario] = [
         outcomes={OC.SURVEY_COMPLETED},
         checks=[scores_were_said],
     ),
+    # ---- claims follow-up: the garage (KPI script, 29 Oct 2026) ----
+    Scenario(
+        "gr_all_branches",
+        "garage-three-cars",
+        "three cars: repaired, in repair, owner not reachable",
+        "คุณชื่อช่างเอก อยู่อู่ ช.ทวีการช่าง รถทะเบียน 1กข 1234 ซ่อมเสร็จแล้ว รถทะเบียน 2ขค 5678 กำลังซ่อม "
+        "น่าจะเสร็จประมาณวันที่ 15 พฤศจิกายน รถทะเบียน 3ฒพ 9012 ลูกค้ายังไม่เอารถเข้ามา อู่โทรหาลูกค้าแล้วแต่ไม่รับสาย "
+        "ตอบทีละคันตามที่บอทถาม",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[
+            cars_are("repaired", "in_repair", "customer_unreachable"),
+            car_has(1, "completion"),
+            has_task("customer_contact"),
+            bot_says(r"ตั้งเบิก", "asks the garage to file the claim"),
+        ],
+        who="เจ้าหน้าที่อู่ซ่อมรถ",
+    ),
+    Scenario(
+        "gr_booked",
+        "garage-three-cars",
+        "owner booked in; one date unknown",
+        "คุณชื่อช่างเอก อยู่อู่ ช.ทวีการช่าง รถทะเบียน 1กข 1234 ยังซ่อมอยู่ รออะไหล่ ยังไม่รู้ว่าจะเสร็จเมื่อไหร่ "
+        "รถทะเบียน 2ขค 5678 ลูกค้ายังไม่เอารถมาจอด แต่อู่โทรนัดแล้ว ลูกค้าจะเอารถเข้าวันที่ 5 พฤศจิกายน "
+        "ได้รถคืนประมาณวันที่ 12 พฤศจิกายน รถทะเบียน 3ฒพ 9012 ซ่อมเสร็จแล้ว ตอบทีละคันตามที่บอทถาม",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[cars_are("in_repair", "booked", "repaired"), car_has(0, "completion"), car_has(1, "appointment")],
+        who="เจ้าหน้าที่อู่ซ่อมรถ",
+    ),
+    Scenario(
+        "gr_all_at_once",
+        "garage-three-cars",
+        "answers every car in one breath",
+        "คุณชื่อช่างเอก อยู่อู่ ช.ทวีการช่าง พอบอทบอกว่าจะถามรถ 3 คัน ให้ตอบรวดเดียวว่า "
+        "'1กข 1234 กับ 2ขค 5678 ซ่อมเสร็จแล้วครับ ส่วน 3ฒพ 9012 ยังซ่อมอยู่ น่าจะเสร็จสิ้นเดือนนี้' แล้วตอบคำถามอื่นตามปกติ",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[cars_are("repaired", "repaired", "in_repair"), car_has(2, "completion")],
+        who="เจ้าหน้าที่อู่ซ่อมรถ",
+    ),
+    Scenario(
+        "gr_hold",
+        "garage-one-car",
+        "asks the bot to hold while checking",
+        "คุณชื่อช่างหนุ่ม อยู่อู่ ส.เจริญยนต์ พอบอทถามเรื่องรถ ให้บอกว่า 'รอสักครู่นะครับ ขอไปดูก่อน' หนึ่งครั้ง "
+        "แล้วตาถัดไปค่อยบอกว่ารถทะเบียน 4กง 3456 ซ่อมเสร็จแล้ว",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[cars_are("repaired")],
+        who="เจ้าหน้าที่อู่ซ่อมรถ",
+    ),
+    Scenario(
+        "gr_not_here",
+        "garage-one-car",
+        "the garage does not have the car",
+        "คุณชื่อช่างหนุ่ม อยู่อู่ ส.เจริญยนต์ ที่อู่ไม่มีรถทะเบียน 4กง 3456 ไม่เคยเข้ามาซ่อม",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[cars_are("not_at_garage"), has_task("question_follow_up")],
+        who="เจ้าหน้าที่อู่ซ่อมรถ",
+    ),
+    Scenario(
+        "gr_asks_payment",
+        "garage-one-car",
+        "asks when the claim will be paid",
+        "คุณชื่อช่างหนุ่ม อยู่อู่ ส.เจริญยนต์ รถทะเบียน 4กง 3456 ซ่อมเสร็จแล้ว ตั้งเบิกไปนานแล้ว ถามว่า 'แล้วเงินจะโอนให้อู่เมื่อไหร่ครับ'",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[cars_are("repaired"), follow_up_or_hotline, bot_never(r"ภายใน \d+ วัน", "promised a payment date")],
+        who="เจ้าหน้าที่อู่ซ่อมรถ",
+    ),
+    Scenario(
+        "gr_wrong_number",
+        "garage-one-car",
+        "not a garage",
+        script=["ฮัลโหล ร้านข้าวมันไก่ครับ", "ไม่ใช่ครับ ที่นี่ร้านข้าวมันไก่ ไม่ใช่อู่", "ครับ"],
+        outcomes={OC.WRONG_PERSON},
+        checks=[bot_never(r"4กง|3456", "read a plate to the wrong number")],
+    ),
+    Scenario(
+        "gr_busy",
+        "garage-three-cars",
+        "busy, call back at three",
+        script=["ครับ อู่ ช.ทวีการช่างครับ", "ตอนนี้ยุ่งมากเลยครับ ช่วยโทรมาใหม่บ่ายสามได้ไหม", "ครับ"],
+        outcomes={OC.CALLBACK_REQUESTED},
+        checks=[callback_time_noted],
+    ),
+    Scenario(
+        "gr_interrupt",
+        "garage-three-cars",
+        "cuts in with the answer while the bot asks",
+        script=[
+            "ครับ ใช่ครับ",
+            f"{INTERRUPT} 1กข 1234 เสร็จแล้วครับ",
+            "ครับ",
+            "คันนี้ซ่อมเสร็จแล้วครับ",
+            "ครับ",
+            "ยังซ่อมอยู่ครับ",
+            "วันที่ 20 ครับ",
+            "ครับ",
+            "ครับ",
+        ],
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[lambda c: None if c.agent.result.vehicles[0].status == "repaired" else "car 1 not repaired"],
+        max_turns=16,
+    ),
+    # ---- claims follow-up: the customer the garage could not reach ----
+    Scenario(
+        "ra_date_given",
+        "repair-honda-city",
+        "names a day to bring the car in",
+        "คุณชื่อสมชาย ใจดี ยินยอมบันทึกเสียง สะดวกเอารถเข้าซ่อมวันจันทร์ที่ 10 พฤศจิกายน ช่วงเช้า ไม่มีคำถามอื่น",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[cars_are("date_given"), car_has(0, "appointment"), has_task("garage_notify"), consent_is(True)],
+    ),
+    Scenario(
+        "ra_not_ready",
+        "repair-yaris",
+        "not ready; maybe next month",
+        "คุณชื่อสมชาย ใจดี ยินยอมบันทึกเสียง ช่วงนี้ยังไม่สะดวกเอารถเข้าซ่อม ต้องใช้รถทุกวัน "
+        "ถ้าบอทถามเดือน ให้บอกว่าน่าจะเดือนธันวาคม ไม่มีคำถามอื่น",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[cars_are("not_ready"), no_task("garage_notify")],
+    ),
+    Scenario(
+        "ra_no_recording",
+        "repair-honda-city",
+        "declines the recording, then gives a date",
+        "คุณชื่อสมชาย ใจดี ไม่ยินยอมให้บันทึกเสียง แต่คุยต่อได้ สะดวกเอารถเข้าซ่อมวันเสาร์ที่ 8 พฤศจิกายน",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[consent_is(False), cars_are("date_given")],
+    ),
+    Scenario(
+        "ra_garage_never_called",
+        "repair-honda-city",
+        "complains the garage never called",
+        "คุณชื่อสมชาย ใจดี ยินยอมบันทึกเสียง หงุดหงิดเล็กน้อย บอกว่าอู่ไม่เคยโทรมาเลย โทรไปที่อู่ก็ไม่มีคนรับ แล้วค่อยบอกว่าสะดวกเอารถเข้าวันพุธหน้า",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[cars_are("date_given"), bot_never(r"อู่.*(ไม่ผิด|ถูกต้องแล้ว)", "defended the garage")],
+    ),
+    Scenario(
+        "ra_asks_cost",
+        "repair-yaris",
+        "asks about the deductible and a courtesy car",
+        "คุณชื่อสมชาย ใจดี ยินยอมบันทึกเสียง ถามว่าต้องจ่ายค่าเสียหายส่วนแรกไหม แล้วมีรถใช้ระหว่างซ่อมไหม "
+        "จากนั้นบอกว่าสะดวกเอารถเข้าวันที่ 15 พฤศจิกายน",
+        outcomes={OC.FOLLOWUP_COMPLETED},
+        checks=[cars_are("date_given"), follow_up_or_hotline],
+    ),
+    Scenario(
+        "ra_wife_answers",
+        "repair-honda-city",
+        "the customer's wife answers",
+        script=["สวัสดีค่ะ", "ไม่ใช่ค่ะ ภรรยาค่ะ สามีไม่อยู่", "ไม่รู้เหมือนกันค่ะ โทรมาใหม่ตอนเย็นแล้วกันนะคะ", "ค่ะ", "ค่ะ"],
+        outcomes={OC.WRONG_PERSON, OC.CALLBACK_REQUESTED},
+        checks=[bot_never(r"ไม่สามารถติดต่อ|สะดวกนำรถ", "talked about the repair to someone else")],
+    ),
+    Scenario(
+        "ra_busy",
+        "repair-yaris",
+        "driving; call back this evening",
+        script=["ครับ ผมเอง", "ตอนนี้ขับรถอยู่ครับ ไม่สะดวก โทรมาหลังหกโมงเย็นได้ไหม", "ครับ"],
+        outcomes={OC.CALLBACK_REQUESTED},
+        checks=[callback_time_noted],
+    ),
 ]
 
 
@@ -713,19 +960,28 @@ async def play(scenario: Scenario) -> Call:
         await dialogue.prepare_opening()
         directive: Directive = dialogue.start()
         for _ in range(scenario.max_turns):
-            agent.report_delivery(len(directive.segments), True)
-            call.turns.append(("bot", directive.text))
             if directive.end_call or agent.state.finished:
+                agent.report_delivery(len(directive.segments), True)
+                call.turns.append(("bot", directive.text))
                 call.ended = True
                 break
-            dialogue.prepare_next()
-            if script is not None:
-                said = script.pop(0) if script else "ครับ"
+            # A scripted line is known before the turn ends, so it can be said over it; a persona's is not.
+            said: str | None = (script.pop(0) if script else "ครับ") if script is not None else ""
+            if said is not None and said.startswith(INTERRUPT):
+                # The customer talks over the turn: only the first half of it was heard.
+                said = said.removeprefix(INTERRUPT).strip()
+                heard = len(directive.segments) // 2
+                agent.report_delivery(heard, False)
+                call.turns.append(("bot", " ".join(s.text for s in directive.segments[:heard]) + " ⟂"))
             else:
+                agent.report_delivery(len(directive.segments), True)
+                call.turns.append(("bot", directive.text))
+            dialogue.prepare_next()
+            if script is None:
                 talk = "\n".join(f"{'บอท' if w == 'bot' else 'ลูกค้า'}: {t}" for w, t in call.turns)
                 text, _ = await customer.chat_text(
                     [
-                        {"role": "system", "content": CUSTOMER.format(persona=scenario.persona)},
+                        {"role": "system", "content": CUSTOMER.format(who=scenario.who, persona=scenario.persona)},
                         {"role": "user", "content": f"บทสนทนา:\n{talk}\n\nลูกค้าพูดว่า:"},
                     ],
                     max_tokens=90,

@@ -22,9 +22,10 @@ from pydantic import BaseModel
 from kpi_voicebot.campaigns import get_profile, load_campaign, validate_case
 from kpi_voicebot.dialogue import AsyncInterpreter, Dialogue
 from kpi_voicebot.engine import BaseEngine
-from kpi_voicebot.models import CampaignId, Directive, PACase
+from kpi_voicebot.models import CampaignId, Directive, GarageCase, PACase, RepairCase
 from kpi_voicebot.pa_engine import PAEngine
 from kpi_voicebot.playback import VoicePlayer
+from kpi_voicebot.repair_engine import RepairEngine
 from kpi_voicebot.responder import Responder
 from kpi_voicebot.survey_engine import SurveyEngine
 
@@ -55,6 +56,8 @@ def build_engine(campaign_id: CampaignId, case: dict[str, object], customer_name
     parsed = validate_case(campaign_id, case)
     if isinstance(parsed, PACase):
         return PAEngine(campaign, parsed, customer_name)
+    if isinstance(parsed, GarageCase | RepairCase):
+        return RepairEngine(campaign, parsed, customer_name)
     return SurveyEngine(campaign, parsed, customer_name)
 
 

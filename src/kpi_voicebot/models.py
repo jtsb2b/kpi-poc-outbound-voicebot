@@ -14,6 +14,10 @@ from pydantic import BaseModel, Field
 class CampaignId(StrEnum):
     PA_CONFIRMATION = "pa_confirmation"
     ACCIDENT_SURVEY = "accident_survey"
+    # Claims follow-up (KPI script of 29 Oct 2026): ask a garage about its cars, and ask a customer the
+    # garage could not reach when they can bring the car in.
+    GARAGE_FOLLOWUP = "garage_followup"
+    REPAIR_APPOINTMENT = "repair_appointment"
 
 
 class Lifecycle(StrEnum):
@@ -55,6 +59,8 @@ class Outcome(StrEnum):
     POLICY_PARTIAL = "policy_partial"
     SURVEY_COMPLETED = "survey_completed"
     SURVEY_PARTIAL = "survey_partial"
+    FOLLOWUP_COMPLETED = "followup_completed"
+    FOLLOWUP_PARTIAL = "followup_partial"
     CALLBACK_REQUESTED = "callback_requested"
     WRONG_PERSON = "wrong_person"
     VERIFICATION_FAILED = "verification_failed"
@@ -85,6 +91,20 @@ TaskType = Literal[
     "safety",
     "urgent",
     "unclear_answer",
+    "customer_contact",  # the garage cannot reach the customer: the company calls them
+    "garage_notify",  # the customer named a repair date: tell the garage to confirm it
+]
+# A car in the garage follow-up, or the customer's own car in the appointment call.
+RepairStatus = Literal[
+    "not_asked",
+    "repaired",  # ready: the garage is asked to file the claim for payment
+    "in_repair",  # still being repaired; completion date asked
+    "awaiting_customer",  # the customer has not brought the car in yet
+    "booked",  # the garage has an appointment with the customer
+    "customer_unreachable",  # the garage cannot reach the customer or has no appointment
+    "not_at_garage",  # the garage does not have this car: staff check the claim
+    "date_given",  # appointment call: the customer named when they can bring the car in
+    "not_ready",  # appointment call: the customer cannot say yet
 ]
 
 
@@ -122,6 +142,27 @@ class SurveyCase(BaseModel):
     accident_date: date
     surveyor_attended: bool | None = None
     verify_birth_date: date | None = None
+
+
+class Vehicle(BaseModel):
+    plate: str  # as read aloud: "1กข 1234 กรุงเทพมหานคร"
+    car: str = ""  # make and model, e.g. "Toyota Yaris สีขาว"
+    customer_name: str = ""
+    claim_no: str = ""
+
+
+class GarageCase(BaseModel):
+    record_id: str
+    data_label: str = "MOCK"
+    garage_name: str
+    vehicles: list[Vehicle] = Field(min_length=1, max_length=5)
+
+
+class RepairCase(BaseModel):
+    record_id: str
+    data_label: str = "MOCK"
+    garage_name: str
+    vehicle: Vehicle
 
 
 class MockProfile(BaseModel):
@@ -189,6 +230,16 @@ class SurveyAnswer(BaseModel):
     changed_from: list[int] = []
 
 
+class VehicleResult(BaseModel):
+    plate: str
+    label: str = ""
+    status: RepairStatus = "not_asked"
+    completion_text: str | None = None  # when repairs should be finished, as the garage said it
+    appointment_text: str | None = None  # when the car goes in for repair
+    pickup_text: str | None = None  # when the car should be ready to collect
+    statement: str | None = None  # what the other side said, word for word
+
+
 class CallbackRequest(BaseModel):
     requested: bool = False
     preferred_time_text: str | None = None
@@ -203,6 +254,7 @@ class ConversationResult(BaseModel):
     policy_fields: list[PolicyFieldResult] = []
     free_look_delivery: Literal["not_delivered", "full", "resumed_after_interruption"] | None = None
     survey_answers: list[SurveyAnswer] = []
+    vehicles: list[VehicleResult] = []
     final_comment_raw: str | None = None
     final_comment_tags: list[str] = []
     tasks: list[FollowUpTask] = []

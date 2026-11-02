@@ -26,7 +26,7 @@ Copy `.env.example` to the ignored `.env` (or point `COMPOSE_ENV_FILE` at anothe
 - `OPERATOR_TOKEN`: the bearer token operators sign in with (at least 12 characters).
 - LiveKit: `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_SIP_OUTBOUND_TRUNK_ID`,
   `SIP_CALLER_NUMBER`, `PUBLIC_CALLER_ID`.
-- Speech recognition: `ASR_PROVIDER=soniox` and `SONIOX_API_KEY`.
+- Speech recognition: `ASR_PROVIDER=soniox` and `SONIOX_API_KEY`, or `ASR_PROVIDER=jai` and `JAIASR_API_KEY`.
 - LLM: `INTERPRETER=llm`, `LLM_PROVIDER=gemini` with a **paid** `GOOGLE_API_KEY` (calls carry customer
   data; the free tier may use requests to improve Google's products). `LLM_PROVIDER=jts` uses
   `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL` instead.

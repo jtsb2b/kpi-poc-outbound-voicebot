@@ -42,6 +42,7 @@ ECHO_TAIL = 0.35  # half duplex: keep the mic muted this long after the bot stop
 SPOKEN_CHARS_PER_SECOND = 13.0  # JAI TTS pace, to map heard time onto segments
 BARGE_IN_SPEECH = 0.7  # seconds of sustained speech that count as cutting in (a "ครับ" is shorter)
 ANSWER_SETTLE = 0.3  # phone: let the media path open after the answer, then greet straight away
+LINE_READY_WAIT = 2.0  # longest the greeting waits for the customer's audio to start arriving
 MAX_RETHINK = 3  # replies started again because the customer was still talking
 PICKUP_WINDOW = 1.2  # a hello committed this soon after the greeting was said over it
 _HELLO = re.compile(r"ฮัลโหล|ฮัลโล|ฮัลโหลว|สวัสดี|ครับผม|ครับ|ค่ะ|คะ|จ้ะ|จ้า|ว่าไง|ใครพูด|ใครคะ|ใครครับ|[\s,.!?…]")
@@ -97,6 +98,7 @@ class VoiceSession:
         echo_guard: bool,
         vad_barge_in: bool = True,
         greet_on_answer: bool = False,
+        line_ready: asyncio.Event | None = None,
         sink: Sink | None = None,
         console: bool = True,
         is_canceled: Callable[[], Awaitable[bool]] | None = None,
@@ -110,6 +112,7 @@ class VoiceSession:
         self.echo_guard = echo_guard
         self.vad_barge_in = vad_barge_in
         self.greet_on_answer = greet_on_answer
+        self.line_ready = line_ready  # set when the customer's audio starts arriving (phone)
         self.greeting = False  # the opening line is playing
         self.greeting_ended_at = 0.0
         self.sink = sink
@@ -194,7 +197,16 @@ class VoiceSession:
             heard = self.collector.heard
             if self.greeting:
                 heard = without_hello(heard)
-            if self.full_duplex and self.player.speaking and is_barge_in(heard) and not self._is_echo(heard):
+            # The bot's own voice coming back down the line never cuts it off (the echo guard proper stays off
+            # on the phone: it dropped real replies; here it only stops a false barge-in).
+            own_voice = echo_of(heard, self.speaking_text)
+            if (
+                self.full_duplex
+                and self.player.speaking
+                and is_barge_in(heard)
+                and not self._is_echo(heard)
+                and not own_voice
+            ):
                 self.barge.set()
 
     async def _watch_cancel(self) -> None:
@@ -284,6 +296,10 @@ class VoiceSession:
         if self.greet_on_answer:
             # Like a person calling: speak first, at once. The greeting was read ahead while ringing.
             self.player.prefetch_directive(directive)
+            if self.line_ready is not None:
+                # Greet once audio flows both ways, not on a fixed timer: the first words were the choppiest.
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(self.line_ready.wait(), LINE_READY_WAIT)
             await asyncio.sleep(ANSWER_SETTLE)
             self.greeting = True
         waited_from = time.monotonic()

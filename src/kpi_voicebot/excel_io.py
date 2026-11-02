@@ -57,6 +57,66 @@ COLUMNS: dict[CampaignId, list[tuple[str, str, bool]]] = {
         ("phone", "เบอร์ในไฟล์ (ใช้ตรวจสอบเท่านั้น)", False),
     ],
 }
+# Claims follow-up: one row per garage, its cars in numbered columns (plate_1, car_1, owner_1, claim_no_1, …).
+GARAGE_MAX_CARS = 5
+_VEHICLE_COLUMNS = (
+    ("plate", "ทะเบียนรถ เช่น 1กข 1234 กรุงเทพมหานคร"),
+    ("car", "ยี่ห้อ รุ่น สี (พิมพ์ภาษาไทย ระบบอ่านออกเสียง)"),
+    ("owner", "ชื่อเจ้าของรถ"),
+    ("claim_no", "เลขที่เคลม"),
+)
+COLUMNS[CampaignId.GARAGE_FOLLOWUP] = [
+    ("record_id", "รหัสรายการ (ไม่ซ้ำ)", True),
+    ("garage_name", "ชื่ออู่ (ไม่ต้องมีคำว่า อู่)", True),
+    *[
+        (f"{column}_{n}", f"คันที่ {n}: {description}", n == 1 and column == "plate")
+        for n in range(1, GARAGE_MAX_CARS + 1)
+        for column, description in _VEHICLE_COLUMNS
+    ],
+    ("phone", "เบอร์ในไฟล์ (ใช้ตรวจสอบเท่านั้น)", False),
+]
+COLUMNS[CampaignId.REPAIR_APPOINTMENT] = [
+    ("record_id", "รหัสรายการ (ไม่ซ้ำ)", True),
+    ("garage_name", "ชื่ออู่คู่สัญญาที่ซ่อม (ไม่ต้องมีคำว่า อู่)", True),
+    ("plate", "ทะเบียนรถ เช่น 1กข 1234 กรุงเทพมหานคร", True),
+    ("car", "ยี่ห้อ รุ่น สี (พิมพ์ภาษาไทย ระบบอ่านออกเสียง)", False),
+    ("claim_no", "เลขที่เคลม", False),
+    ("customer_name", "ชื่อลูกค้าในไฟล์ (ใช้ตรวจสอบเท่านั้น ระบบใช้ชื่อจากฟอร์ม)", False),
+    ("phone", "เบอร์ในไฟล์ (ใช้ตรวจสอบเท่านั้น)", False),
+]
+
+
+def _nest_vehicles(campaign: CampaignId, case: dict[str, Any], info: dict[str, str]) -> dict[str, Any]:
+    """The flat spreadsheet columns as the case's car list (garage) or car (customer call)."""
+    if campaign is CampaignId.GARAGE_FOLLOWUP:
+        cars = []
+        for n in range(1, GARAGE_MAX_CARS + 1):
+            car = {column: case.pop(f"{column}_{n}", None) for column, _ in _VEHICLE_COLUMNS}
+            if car["plate"]:
+                owner = car.pop("owner")
+                cars.append({k: v for k, v in {**car, "customer_name": owner}.items() if v})
+        return {**case, "vehicles": cars}
+    if campaign is CampaignId.REPAIR_APPOINTMENT:
+        car = {k: case.pop(k, None) for k in ("plate", "car", "claim_no")}
+        car["customer_name"] = info.get("customer_name")
+        return {**case, "vehicle": {k: v for k, v in car.items() if v}}
+    return case
+
+
+def _flat_example(campaign: CampaignId, case: dict[str, Any]) -> dict[str, Any]:
+    """A mock profile in the spreadsheet's flat columns, for the template's example row."""
+    if campaign is CampaignId.GARAGE_FOLLOWUP:
+        flat = {k: v for k, v in case.items() if k != "vehicles"}
+        for n, car in enumerate(case.get("vehicles", []), 1):
+            flat |= {f"plate_{n}": car.get("plate"), f"car_{n}": car.get("car")}
+            flat |= {f"owner_{n}": car.get("customer_name"), f"claim_no_{n}": car.get("claim_no")}
+        return flat
+    if campaign is CampaignId.REPAIR_APPOINTMENT:
+        car = case.get("vehicle", {})
+        return {**{k: v for k, v in case.items() if k != "vehicle"}, **car}
+    return case
+
+
 _DATE_COLUMNS = {"effective_date", "accident_date", "verify_birth_date"}
 _NUMBER_COLUMNS = {
     "death_benefit_thb",
@@ -164,6 +224,7 @@ def parse_workbook(campaign: CampaignId, content: bytes) -> list[dict[str, Any]]
                 errors.append(f"{column}: {exc}")
         case = {k: v for k, v in case.items() if v is not None or k == "surveyor_attended"}
         case["data_label"] = "IMPORT"
+        case = _nest_vehicles(campaign, case, info)
         record: dict[str, Any] | None = None
         if not errors:
             try:
@@ -229,6 +290,7 @@ def export_calls(calls: list[dict[str, Any]], transcripts: list[dict[str, Any]],
     summary_rows = []
     policy_rows: list[list[Any]] = []
     survey_rows: list[list[Any]] = []
+    vehicle_rows: list[list[Any]] = []
     task_rows: list[list[Any]] = []
     for c in calls:
         result = c.get("result") or {}
@@ -299,6 +361,19 @@ def export_calls(calls: list[dict[str, Any]], transcripts: list[dict[str, Any]],
                     result.get("final_comment_raw"),
                 ]
             )
+        for v in result.get("vehicles", []):
+            vehicle_rows.append(
+                [
+                    c["_id"],
+                    v["plate"],
+                    v.get("label"),
+                    v["status"],
+                    v.get("completion_text"),
+                    v.get("appointment_text"),
+                    v.get("pickup_text"),
+                    v.get("statement"),
+                ]
+            )
         for t in tasks:
             task_rows.append([c["_id"], t["type"], t["reason"], t.get("field"), t.get("detail_raw")])
 
@@ -351,6 +426,21 @@ def export_calls(calls: list[dict[str, Any]], transcripts: list[dict[str, Any]],
             ],
             survey_rows,
         )
+    if vehicle_rows:
+        _write(
+            wb.create_sheet("Vehicles"),
+            [
+                "call_id",
+                "plate",
+                "car",
+                "status",
+                "completion_text",
+                "appointment_text",
+                "pickup_text",
+                "statement (verbatim)",
+            ],
+            vehicle_rows,
+        )
     _write(wb.create_sheet("FollowUps"), ["call_id", "type", "reason", "field", "customer_words"], task_rows)
     _write(
         wb.create_sheet("Transcript"),
@@ -386,7 +476,7 @@ def template_workbook(campaign: CampaignId) -> bytes:
     assert ws is not None
     ws.title = "records"
     spec = COLUMNS[campaign]
-    example = next(p for p in load_profiles() if p.campaign == campaign).case
+    example = _flat_example(campaign, next(p for p in load_profiles() if p.campaign == campaign).case)
     row = [example.get(c) for c, _, _ in spec]
     row = [v.isoformat() if isinstance(v, date) else v for v in row]
     _write(ws, [c for c, _, _ in spec], [row])

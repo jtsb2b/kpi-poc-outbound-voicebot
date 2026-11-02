@@ -36,6 +36,8 @@ def scrub_customer_text(result: dict[str, Any]) -> dict[str, Any]:
     for a in result.get("survey_answers", []):
         a["raw_utterance"] = None
         a["feedback_raw"] = None
+    for v in result.get("vehicles", []):
+        v["statement"] = None
     for t in result.get("tasks", []):
         t["detail_raw"] = None
     result["final_comment_raw"] = None
