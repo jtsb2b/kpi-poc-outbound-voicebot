@@ -1,4 +1,4 @@
-export type CampaignId = "pa_confirmation" | "accident_survey";
+export type CampaignId = "pa_confirmation" | "accident_survey" | "garage_followup" | "repair_appointment";
 
 export interface Profile {
   profile_id: string;
@@ -51,6 +51,16 @@ export interface Task {
   field?: string | null;
 }
 
+export interface VehicleResult {
+  plate: string;
+  label: string;
+  status: string;
+  completion_text?: string | null;
+  appointment_text?: string | null;
+  pickup_text?: string | null;
+  statement?: string | null;
+}
+
 export interface CallResult {
   identity_result: string;
   notice_delivered: boolean;
@@ -59,6 +69,7 @@ export interface CallResult {
   policy_fields: PolicyField[];
   free_look_delivery?: string | null;
   survey_answers: SurveyAnswer[];
+  vehicles?: VehicleResult[];
   final_comment_raw?: string | null;
   final_comment_tags: string[];
   tasks: Task[];

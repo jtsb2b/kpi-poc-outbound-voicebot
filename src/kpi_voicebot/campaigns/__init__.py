@@ -14,7 +14,7 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
-from kpi_voicebot.models import CampaignId, MockProfile, PACase, SurveyCase
+from kpi_voicebot.models import CampaignId, GarageCase, MockProfile, PACase, RepairCase, SurveyCase
 
 WordingStatus = Literal["poc_approved", "kpi_source", "pending_kpi_approval"]
 
@@ -113,6 +113,11 @@ class Campaign(BaseModel):
     policy_fields: list[PolicyFieldSpec] = []
     questions: list[QuestionSpec] = []
     faq: list[FaqEntry] = []
+    # Who answers: a customer (identity, AI disclosure, "is now a good time") or a partner garage, where the
+    # KPI script goes straight to the cars.
+    party: Literal["customer", "garage"] = "customer"
+    # The recording notice and consent question; KPI's garage script (29 Oct 2026) has none.
+    recording_notice: bool = True
     snapshot_id: str = ""
 
     def text(self, key: str) -> Wording:
@@ -169,6 +174,8 @@ def load_campaign(campaign_id: CampaignId) -> Campaign:
         raise ValueError(f"{campaign_id}: missing wording keys {sorted(missing)}")
     if campaign.id is CampaignId.PA_CONFIRMATION and not campaign.review_units:
         raise ValueError("pa_confirmation needs review_units")
+    if campaign.id in REPAIR_CAMPAIGNS and not {k for k in campaign.wording if k.startswith("car_")}:
+        raise ValueError(f"{campaign_id}: needs its car_ wording")
     if campaign.id is CampaignId.ACCIDENT_SURVEY and len(campaign.questions) != 5:
         raise ValueError("accident_survey needs five questions")
     digest = hashlib.sha256(json.dumps(data, sort_keys=True, default=str).encode()).hexdigest()
@@ -187,7 +194,14 @@ def get_profile(profile_id: str) -> MockProfile | None:
     return next((p for p in load_profiles() if p.profile_id == profile_id), None)
 
 
-def validate_case(campaign: CampaignId, case: dict[str, object]) -> PACase | SurveyCase:
+REPAIR_CAMPAIGNS = frozenset({CampaignId.GARAGE_FOLLOWUP, CampaignId.REPAIR_APPOINTMENT})
+
+
+def validate_case(campaign: CampaignId, case: dict[str, object]) -> PACase | SurveyCase | GarageCase | RepairCase:
     if campaign is CampaignId.PA_CONFIRMATION:
         return PACase.model_validate(case)
+    if campaign is CampaignId.GARAGE_FOLLOWUP:
+        return GarageCase.model_validate(case)
+    if campaign is CampaignId.REPAIR_APPOINTMENT:
+        return RepairCase.model_validate(case)
     return SurveyCase.model_validate(case)

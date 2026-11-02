@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   IdempotencyKeys,
   type Api,
@@ -10,22 +10,9 @@ import {
   type SystemStatus,
 } from "../api";
 import { caseSummary } from "../format";
-import {
-  AlertIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  DownloadIcon,
-  FileIcon,
-  FlaskIcon,
-  PhoneIcon,
-  ShieldCheckIcon,
-  StarIcon,
-  UploadIcon,
-} from "../icons";
+import { AlertIcon, CalendarIcon, CheckIcon, ChevronDownIcon, DownloadIcon, FileIcon, PhoneIcon, ShieldCheckIcon, StarIcon, UploadIcon, WrenchIcon } from "../icons";
 
 type SourceKind = "profile" | "import";
-type ScriptKind = "scenario" | "custom";
-type Mode = "simulation" | "live";
 
 export interface Draft {
   campaignId: CampaignId;
@@ -58,6 +45,16 @@ const CAMPAIGN_COPY: Record<
     sub: "หลังใช้บริการรับแจ้งอุบัติเหตุรถยนต์",
     Icon: StarIcon,
   },
+  garage_followup: {
+    title: "ติดตามอู่วางบิล",
+    sub: "สอบถามสถานะซ่อมรถทีละคัน และขอให้ตั้งเบิกเคลม",
+    Icon: WrenchIcon,
+  },
+  repair_appointment: {
+    title: "นัดเข้าซ่อมกับลูกค้า",
+    sub: "ลูกค้าที่อู่ติดต่อไม่ได้ ถามวันที่สะดวกนำรถเข้าซ่อม",
+    Icon: CalendarIcon,
+  },
 };
 
 /** +6621004148 → 02-100-4148 */
@@ -67,9 +64,6 @@ function callerDisplay(e164: string): string {
     ? `${national.slice(0, 2)}-${national.slice(2, 5)}-${national.slice(5)}`
     : national;
 }
-
-const CUSTOM_HINT =
-  "พิมพ์คำตอบของลูกค้าทีละบรรทัด\n[SILENCE] = เงียบ · [HANGUP] = วางสาย · [INTERRUPT:1] ข้อความ = พูดแทรก";
 
 export function CallSetup({
   draft,
@@ -95,10 +89,6 @@ export function CallSetup({
   const [imported, setImported] = useState<ImportResult | null>(null);
   const [rowNumber, setRowNumber] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [scriptKind, setScriptKind] = useState<ScriptKind>("scenario");
-  const [modeChoice, setModeChoice] = useState<Mode>("simulation");
-  const [scenarioId, setScenarioId] = useState("");
-  const [customScript, setCustomScript] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const keys = useRef(new IdempotencyKeys());
@@ -112,15 +102,6 @@ export function CallSetup({
     setImported(null);
     setRowNumber(null);
   }, [campaign]);
-
-  // The default scenario follows the chosen mock profile, so test mode can stay closed.
-  useEffect(() => {
-    if (!campaign) return;
-    const match =
-      campaign.scenarios.find((s) => s.profile === profileId) ??
-      campaign.scenarios[0];
-    setScenarioId(match?.id ?? "");
-  }, [campaign, profileId]);
 
   useEffect(() => {
     const value = phone.trim();
@@ -136,8 +117,6 @@ export function CallSetup({
     return () => clearTimeout(id);
   }, [api, phone]);
 
-  const scenarios = useMemo(() => campaign?.scenarios ?? [], [campaign]);
-  const scenario = scenarios.find((s) => s.id === scenarioId);
   const record =
     sourceKind === "profile"
       ? campaign?.profiles.find((p) => p.profile_id === profileId)?.case
@@ -145,16 +124,12 @@ export function CallSetup({
         undefined);
 
   const phoneOk = Boolean(phoneCheck?.valid && phoneCheck.dialable);
+  // Only real calls are placed from here (the simulation mode was removed from the page, 21 Oct 2026).
   const live = Boolean(status?.telephony_ready);
-  const mode: Mode = live ? modeChoice : "simulation";
-  const scriptOk =
-    mode === "live" ||
-    (scriptKind === "scenario"
-      ? Boolean(scenarioId)
-      : customScript.trim().length > 0);
-  const offHours =
-    mode === "live" && status ? !status.within_calling_hours : false;
-  const missing = !name.trim()
+  const offHours = status ? !status.within_calling_hours : false;
+  const missing = !live
+    ? "ยังไม่เปิดใช้การโทรจริง (ตั้งค่าระบบโทรศัพท์ใน .env)"
+    : !name.trim()
     ? "กรอกชื่อผู้รับสาย"
     : !phoneOk
       ? "กรอกเบอร์โทรให้ถูกต้อง"
@@ -163,9 +138,7 @@ export function CallSetup({
         : offHours
           ? `อยู่นอกเวลาโทร (${status?.calling_hours})`
           : null;
-  const canCall = Boolean(
-    campaign && !missing && scriptOk && !busy && !submitting,
-  );
+  const canCall = Boolean(campaign && !missing && !busy && !submitting);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -176,7 +149,7 @@ export function CallSetup({
       campaign: campaignId,
       target_name: name.trim(),
       phone: phone.trim(),
-      mode,
+      mode: "live",
       source:
         sourceKind === "profile"
           ? { type: "profile", profile_id: profileId }
@@ -185,12 +158,6 @@ export function CallSetup({
               import_id: imported?.import_id,
               row_number: rowNumber,
             },
-      scenario_id:
-        mode === "simulation" && scriptKind === "scenario" ? scenarioId : null,
-      custom_script:
-        mode === "simulation" && scriptKind === "custom"
-          ? customScript.split("\n").filter((l) => l.trim())
-          : null,
     };
     try {
       const call = await api.createCall(payload, keys.current.keyFor(payload));
@@ -251,35 +218,13 @@ export function CallSetup({
 
       {live && (
         <div className="section">
-          <div
-            className="segmented block"
-            role="group"
-            aria-label="รูปแบบการโทร"
-          >
-            <button
-              type="button"
-              aria-pressed={mode === "simulation"}
-              onClick={() => setModeChoice("simulation")}
-            >
-              จำลอง
-            </button>
-            <button
-              type="button"
-              aria-pressed={mode === "live"}
-              onClick={() => setModeChoice("live")}
-            >
-              โทรจริง
-            </button>
-          </div>
-          {mode === "live" && (
-            <p className="section-note">
-              โทรออกจริงผ่านระบบโทรศัพท์
-              {status?.caller_id
-                ? ` · ลูกค้าจะเห็นเบอร์ ${callerDisplay(status.caller_id)}`
-                : ""}{" "}
-              · โทรครั้งเดียว ไม่โทรซ้ำอัตโนมัติ
-            </p>
-          )}
+          <p className="section-note">
+            โทรออกจริงผ่านระบบโทรศัพท์
+            {status?.caller_id
+              ? ` · ลูกค้าจะเห็นเบอร์ ${callerDisplay(status.caller_id)}`
+              : ""}{" "}
+            · โทรครั้งเดียว ไม่โทรซ้ำอัตโนมัติ
+          </p>
         </div>
       )}
 
@@ -338,13 +283,13 @@ export function CallSetup({
         </h2>
         <div className="group">
           <label className="row field" htmlFor="name">
-            <span className="row-label">ชื่อ-นามสกุล</span>
+            <span className="row-label">{campaignId === "garage_followup" ? "ชื่อผู้ติดต่อที่อู่" : "ชื่อ-นามสกุล"}</span>
             <input
               id="name"
               className="row-input"
               type="text"
               autoComplete="off"
-              placeholder="เช่น สมชาย ใจดี"
+              placeholder={campaignId === "garage_followup" ? "เช่น ช่างเอก (ใช้บันทึกเท่านั้น)" : "เช่น สมชาย ใจดี"}
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
@@ -528,7 +473,7 @@ export function CallSetup({
                 {caseSummary(record).map(([k, v]) => (
                   <div key={k} style={{ display: "contents" }}>
                     <dt>{k}</dt>
-                    <dd>{v}</dd>
+                    <dd style={{ whiteSpace: "pre-line" }}>{v}</dd>
                   </div>
                 ))}
               </dl>
@@ -536,93 +481,6 @@ export function CallSetup({
           </details>
         )}
       </section>
-
-      {mode === "simulation" && (
-        <section className="section">
-          <details className="group disclosure">
-            <summary className="row">
-              <span className="tile-icon small">
-                <FlaskIcon size={18} />
-              </span>
-              <span className="choice-text">
-                <span className="choice-title">โหมดทดสอบ</span>
-                <span className="choice-sub">
-                  {`ยังไม่โทรจริง ลูกค้าจำลองจะตอบแบบ “${scriptKind === "custom" ? "พิมพ์เอง" : (scenario?.label ?? "—")}”`}
-                </span>
-              </span>
-              <span className="row-trailing">
-                <ChevronDownIcon size={18} className="chev" />
-              </span>
-            </summary>
-            <div className="disclosure-body">
-              <div
-                className="segmented block"
-                role="group"
-                aria-label="รูปแบบคำตอบจำลอง"
-              >
-                <button
-                  type="button"
-                  aria-pressed={scriptKind === "scenario"}
-                  onClick={() => setScriptKind("scenario")}
-                >
-                  สถานการณ์สำเร็จรูป
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={scriptKind === "custom"}
-                  onClick={() => setScriptKind("custom")}
-                >
-                  พิมพ์คำตอบเอง
-                </button>
-              </div>
-              {scriptKind === "scenario" ? (
-                <>
-                  <label className="sr-only" htmlFor="scenario">
-                    สถานการณ์
-                  </label>
-                  <select
-                    id="scenario"
-                    className="control"
-                    value={scenarioId}
-                    onChange={(e) => setScenarioId(e.target.value)}
-                  >
-                    {scenarios.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
-                  {scenario && (
-                    <p className="section-note flush">
-                      ลูกค้าจะตอบ: {scenario.customer.slice(0, 4).join(" → ")}
-                      {scenario.customer.length > 4 ? " → …" : ""}
-                    </p>
-                  )}
-                </>
-              ) : (
-                <>
-                  <label className="sr-only" htmlFor="custom">
-                    คำตอบของลูกค้า
-                  </label>
-                  <textarea
-                    id="custom"
-                    className="control"
-                    placeholder={CUSTOM_HINT}
-                    value={customScript}
-                    onChange={(e) => setCustomScript(e.target.value)}
-                  />
-                </>
-              )}
-              {campaign && campaign.pending_approval.length > 0 && (
-                <p className="section-note flush">
-                  มีข้อความหรือข้อมูลที่ยังรอ KPI อนุมัติ{" "}
-                  {campaign.pending_approval.length} รายการ
-                </p>
-              )}
-            </div>
-          </details>
-        </section>
-      )}
 
       {error && (
         <div className="section">
@@ -646,10 +504,7 @@ export function CallSetup({
         <span className="caption">
           {busy
             ? "มีสายที่กำลังดำเนินการอยู่"
-            : (missing ??
-              (mode === "live"
-                ? "ระบบจะโทรออกจริงไปยังเบอร์นี้"
-                : "โหมดจำลอง · ระบบยังไม่โทรออกจริง"))}
+            : (missing ?? "ระบบจะโทรออกจริงไปยังเบอร์นี้")}
         </span>
       </div>
     </form>

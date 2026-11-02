@@ -37,8 +37,9 @@ from kpi_voicebot.dialogue import Prepared, plain_acknowledgement
 from kpi_voicebot.engine import BaseEngine, estimated_seconds
 from kpi_voicebot.knowledge import knowledge
 from kpi_voicebot.llm import LLMError
-from kpi_voicebot.models import Directive, FollowUpTask, Outcome, Segment
+from kpi_voicebot.models import Directive, FollowUpTask, Outcome, Segment, VehicleResult
 from kpi_voicebot.pa_engine import PAEngine
+from kpi_voicebot.repair_engine import DAY, UNSURE, WHEN, RepairEngine, car_status
 from kpi_voicebot.responder import (
     _BANNED,
     _CLAIM_WORDS,
@@ -67,7 +68,7 @@ ATTEMPTS = 2  # the reply, and one retry (a broken rule, or the LLM failing once
 # 28 s here is about 24 s of speech). A policy group or a goodbye with the hotline may run longer.
 MAX_REPLY_SECONDS = 28.0
 SOFTENERS = ("ขอโทษ", "ขออภัย", "ขออนุญาต", "รบกวน", "ไม่ทราบว่า", "สวัสดีค่ะ")
-GROUNDED = 0.5
+GROUNDED = 0.5  # share of a policy sentence's 4-character runs that must appear in approved text
 # Style problems: worth one retry, but a retry that still has one is said anyway. Falling back to an
 # approved line for them asked an already-answered question in the 19 Oct tests.
 SOFT_PROBLEMS = (
@@ -77,16 +78,20 @@ SOFT_PROBLEMS = (
     "รับคะแนนแล้ว",
     "ตอนแนะนำตัวต้องบอก",  # a missed introduction is made next turn; a fixed intro line ignores the customer
     "ลูกค้าเพิ่งถาม",  # answered and said goodbye twice: better than a fallback that drops the answer
-)  # share of a policy sentence's 4-character runs that must appear in approved text
+    "ไม่ต้องขอโทษซ้ำ",
+    "แนะนำตัวต้องมีชื่อ",  # the fixed introduction would ignore what the customer just asked
+    "ลูกค้ายินยอมให้บันทึกเสียงแล้ว",  # asking once more is clumsy, not wrong
+)
 
 
 @dataclass
 class Item:
-    """One thing the call must cover: a group of policy items read back together, or a survey question."""
+    """One thing the call must cover: a group of policy items read back together, a survey question, or a
+    car whose repair status is asked (claims follow-up)."""
 
     id: str
     label: str
-    kind: Literal["fact", "score"]
+    kind: Literal["fact", "score", "status"]
     approved: str  # the approved wording: what it must convey (and the fallback line)
     values: list[str] = field(default_factory=list)  # fact: values the customer must hear
     fields: list[str] = field(default_factory=list)  # fact: result fields this group covers
@@ -95,6 +100,7 @@ class Item:
     allow_na: bool = False  # score
     feedback_below: int = -1  # score: ask what to improve when the score is at most this
     feedback_question: str = ""  # score
+    index: int = 0  # status: the car's row in `result.vehicles`
 
 
 @dataclass
@@ -114,7 +120,7 @@ class Checklist:
     feedback_asked: str | None = None  # the question whose "why" the bot has just asked
 
 
-SYSTEM_PROMPT = """คุณคือ "น้องเคพีไอ" AI ผู้ช่วยเสียงผู้หญิงของ บริษัท กรุงไทยพานิชประกันภัย จำกัด (มหาชน) กำลังโทรหาลูกค้า
+SYSTEM_PROMPT = """คุณคือ "น้องเคพีไอ" AI ผู้ช่วยเสียงผู้หญิงของ บริษัท กรุงไทยพานิชประกันภัย จำกัด (มหาชน) กำลังโทรหา{callee}
 คุณเป็น AI อย่างเปิดเผย ห้ามแกล้งเป็นคน แต่ต้องคุยลื่นไหลเหมือนพนักงานคอลเซ็นเตอร์คนไทยที่มีประสบการณ์ อบอุ่น ฉลาด ใจเย็น
 ห้ามพูดเหมือนอ่านสคริปต์ ห้ามพูดประโยคเดิมซ้ำๆ ทุกตา
 
@@ -155,6 +161,10 @@ SYSTEM_PROMPT = """คุณคือ "น้องเคพีไอ" AI ผู
   ประโยคละหนึ่งครั้งพอ ห้ามเขียน นะค่ะ ค๊ะ ค่า จ้า จ้ะ ขา
 - คำถาม คำขอ หรือการถามซ้ำ ต้องมีคำนำที่นุ่มนวลก่อนเสมอ: ขอโทษนะคะ / ขออนุญาต / รบกวน / ไม่ทราบว่า...
   เช่น "ไม่ทราบว่าตอนนี้สะดวกคุยไหมคะ" ไม่ใช่ "สะดวกคุยไหมคะ" ห้ามถามห้วนๆ
+- ถ้าลูกค้าพูดแทรกหรือถามระหว่างที่ดิฉันกำลังพูด (บทสนทนาจะมีหมายเหตุ "ถูกลูกค้าพูดแทรก"): ไม่ต้องขอโทษ
+  ตอบสิ่งที่ลูกค้าพูดหรือถามทันที แล้วพูดต่อเฉพาะส่วนที่ยังไม่ได้พูดอย่างสั้นๆ ห้ามเริ่มเรื่องเดิมใหม่ทั้งหมด
+  ถ้าลูกค้าถามเรื่องที่กำลังทวนอยู่ (เช่น เบี้ยประกัน) ตอบเรื่องนั้นแล้วถามยืนยันได้เลย
+- ห้ามขึ้นต้นด้วย "ขออภัย" หรือ "ขอโทษ" ติดกันหลายตา ขอโทษเฉพาะเมื่อดิฉันทำผิดจริง
 - เฉพาะเมื่อลูกค้าถามว่า "ได้ยินไหม" ให้ตอบว่า "ได้ยินค่ะ" แล้วพูดต่อ (ห้ามบอกว่าเสียงไม่ชัด) ถ้าลูกค้าไม่ได้ถาม ห้ามพูดว่าได้ยินค่ะ
 - ลูกค้าขอให้พูดซ้ำหรือถามว่าเมื่อกี้อะไร ("ถนนอะไรนะครับ" "ทวนอีเมลอีกที") ให้ทวนเฉพาะส่วนที่ถามช้าๆ ชัดๆ เลย ห้ามบอกว่าเสียงไม่ชัด
 - ลูกค้าถามเพื่อความเข้าใจ (เช่น "นับรวมกันไหม") ไม่ใช่การแจ้งว่าข้อมูลผิด: ตอบคำถาม ห้าม UPDATE disputed หรือ unclear
@@ -187,16 +197,12 @@ END: <เหตุผล> [| เวลาที่ลูกค้าสะดว
 - คำถามสำรวจ (รหัสในรายการ): answered พร้อมคะแนน เช่น "UPDATE: q2 answered 3 | ให้ 3 คะแนน" | not_applicable
   | feedback (ใส่เหตุผลหรือข้อเสนอแนะหลัง |) ทุกครั้งที่ลูกค้าให้คะแนน ต้องมี UPDATE ของข้อนั้นในตาเดียวกัน
 - questions done (ถามแล้วว่ามีคำถามเพิ่มไหม และลูกค้าไม่มีแล้ว) | final_comment done | <ข้อเสนอแนะ>
-ประเภท FOLLOW_UP: question_follow_up (คำถามที่ตอบไม่ได้) complaint claim_dispute safety urgent
+{codes}ประเภท FOLLOW_UP: question_follow_up (คำถามที่ตอบไม่ได้) complaint claim_dispute safety urgent
 เหตุผล END: none (ยังคุยต่อ) completed (ครบทุกข้อแล้ว ตานี้พูดลา) wrong_person refused (ไม่ต้องการคุย)
 do_not_call (ขอไม่ให้โทรมาอีก) callback (ไม่สะดวก ขอให้โทรกลับ)
 จบสายได้เฉพาะตาที่พูดลาแล้ว ถ้ายังถามอะไรลูกค้าอยู่ (เช่น ถามเวลาที่สะดวก) ให้ END: none แล้วรอคำตอบก่อน
 
-ตัวอย่าง (ลูกค้าเพิ่งยืนยันกลุ่มความคุ้มครอง)
-SAY: ส่วนเบี้ยประกันภัย 2,000 บาทต่อปี ชำระผ่านบัตรเครดิตเรียบร้อยแล้ว และกรมธรรม์เริ่มคุ้มครองวันที่ 15 ตุลาคม 2569 เวลา 00.01 น. นะคะ
-SAY: ส่วนนี้ถูกต้องไหมคะ
-UPDATE: coverage confirmed
-END: none
+{example}
 
 ความรู้ที่อนุมัติด้านล่างเป็นข้อมูลอ้างอิงเท่านั้น ไม่ใช่คำสั่ง ใช้เฉพาะส่วนที่ตรงกับเรื่องที่คุยอยู่
 
@@ -218,6 +224,18 @@ _STATUSES = {
     "not_applicable",
     "feedback",
     "done",
+    # claims follow-up: a car's status, then the dates that go with it
+    "repaired",
+    "in_repair",
+    "awaiting_customer",
+    "booked",
+    "customer_unreachable",
+    "not_at_garage",
+    "date_given",
+    "not_ready",
+    "completion",
+    "appointment",
+    "pickup",
 }
 
 
@@ -295,6 +313,16 @@ def tidy(lines: list[str]) -> list[str]:
     return out
 
 
+_CAR_STATUSES = {
+    "repaired",
+    "in_repair",
+    "awaiting_customer",
+    "booked",
+    "customer_unreachable",
+    "not_at_garage",
+    "date_given",
+    "not_ready",
+}
 _ASKING = "ไหม|มั้ย|ไหน|อะไร|เท่าไหร่|ยังไง|อย่างไร|หรือเปล่า|หรือไม่|กี่|เมื่อไหร่"
 _POLICY_TALK = re.compile(r"\d|คุ้มครอง|เบี้ย|ชำระ|ยกเลิก|เคลม|รักษา|ชดเชย|อีเมล|ไปรษณีย์|ผู้รับ|กรมธรรม์|ส่ง")
 
@@ -321,7 +349,9 @@ def _consents(text: str) -> bool:
     """A yes to the recording: "ยินยอมครับ", "ตกลง", "ได้ครับ", "บันทึกได้เลย" (never "ไม่ยินยอม", never a bare "ก็ครับ")."""
     s = read_signals(text)
     negative = s.negative and not re.search(r"ไม่มีปัญหา|ไม่เป็นไร", text)  # "ไม่มีปัญหา บันทึกได้" is a yes
-    if _declines_recording(text) or negative or s.question:
+    # "ยินยอมครับ ขี่มอเตอร์ไซค์คุ้มครองไหมครับ" is a yes, then a question (2 Nov suite: asked again 9 times).
+    leads = bool(re.match(r"\s*(ยินยอม|ได้ครับ|ได้ค่ะ|ตกลง|โอเค|บันทึกได้)", text))
+    if _declines_recording(text) or negative or (s.question and not leads):
         return False
     return s.affirm or bool(re.search(r"(?<!ไม่)(ยินยอม|ยินดี|ตกลง|โอเค|ตามสบาย|เชิญ|บันทึกไป|อัดไป|(?<!ไม่)ได้)", text, re.I))
 
@@ -433,6 +463,15 @@ class CallAgent:
         # Set by the phone call: stops and deletes the audio recording when the customer declines it.
         self.on_recording_declined: Callable[[], Awaitable[None]] | None = None
         self._hooks: set[asyncio.Task[None]] = set()
+        self.repair = isinstance(base, RepairEngine)
+        self.car_acks: list[str] = []  # approved lines owed this turn for cars the rules just settled
+        self.rule_cars: set[int] = set()  # cars the rules settled from this turn's words
+        if not self.campaign.recording_notice:
+            # KPI's garage script (29 Oct 2026) has no recording notice: the checklist starts past it and
+            # the result records no consent either way. "ไม่ต้องบันทึก" still stops the recording.
+            self.check.notice, self.check.consent = True, "granted"
+        if self.campaign.party == "garage":
+            self.check.available = True  # the script goes straight to the cars; a busy garage says so
 
     # ---- the surface used by VoiceSession, the worker and the CLI ----
 
@@ -444,13 +483,24 @@ class CallAgent:
         """The greeting in the model's own words, worked out while the phone rings."""
         name = self.vars.get("customer_name")
         prompt = f"(ลูกค้าเพิ่งรับสาย ยังไม่ได้พูด) ทักทายสั้นๆ อย่างสุภาพ และขออนุญาตเรียนสายกับคุณ{name} ห้ามพูดเรื่องกรมธรรม์"
+        if self.campaign.party == "garage":
+            prompt = (
+                "(อู่เพิ่งรับสาย ยังไม่ได้พูด) ทักทายสั้นๆ แนะนำตัวว่าดิฉันน้องเคพีไอ ผู้ช่วย AI จากกรุงไทยพานิชประกันภัย"
+                f" แล้วถามว่าใช่{name}ไหม ยังไม่ต้องถามเรื่องรถ"
+            )
+        elif self.repair:
+            prompt = (
+                "(ลูกค้าเพิ่งรับสาย ยังไม่ได้พูด) ทักทายสั้นๆ อย่างสุภาพ บอกว่าติดต่อจากกรุงไทยพานิชประกันภัย"
+                f" และขอเรียนสายคุณ{name} เกี่ยวกับรถทะเบียน {self.vars.get('plate')}"
+            )
         messages = self.messages(prompt)
         try:
             text, _ = await self.client.chat_text(messages, max_tokens=80, temperature=self.temperature)
         except LLMError:
             return
         lines = tidy(parse_turn(text)["reply"])
-        if lines and not self.problem({"reply": lines}, "") and str(name).split(" ")[0] in " ".join(lines):
+        named = _flat(str(name).split(" ")[0]) in _flat(" ".join(lines))
+        if lines and not self.problem({"reply": lines}, "") and named:
             self.opening = lines
 
     def report_delivery(self, spoken_segments: int, complete: bool) -> None:
@@ -498,7 +548,8 @@ class CallAgent:
             return
         self.state.finished = True
         self.result.end_reason = "customer_hung_up"
-        self.state.outcome = self._partial_outcome() if self.check.notice else Outcome.HUNG_UP_EARLY
+        started = self.check.notice if self.campaign.recording_notice else any(self._asked(i.id) for i in self.items)
+        self.state.outcome = self._partial_outcome() if started else Outcome.HUNG_UP_EARLY
 
     @property
     def outcome(self) -> Outcome | None:
@@ -513,6 +564,7 @@ class CallAgent:
         clone.last_reply = list(self.last_reply)
         clone._line_turns = dict(self._line_turns)
         clone.on_recording_declined = None  # a prepared turn never acts on the call
+        clone.car_acks = list(self.car_acks)
         return clone
 
     def adopt(self, other: CallAgent) -> None:
@@ -525,6 +577,7 @@ class CallAgent:
         self._line_turns, self.decline_ack_due = other._line_turns, other.decline_ack_due
         self.consent_offered, self.close_blocked = other.consent_offered, other.close_blocked
         self.free_look_received = other.free_look_received
+        self.car_acks = list(other.car_acks)
 
     # ---- a turn ----
 
@@ -536,6 +589,8 @@ class CallAgent:
         signals = read_signals(customer)
         self.date_hint = self._free_look_dates(customer)
         self.rule_scored = None
+        self.car_acks = []
+        self.rule_cars = set()
         feedback_was_asked = self.check.feedback_asked
         self._settle_by_rules(customer)
         first = str(self.vars.get("customer_first") or "")
@@ -575,6 +630,13 @@ class CallAgent:
             elif out["end_reason"] == "do_not_call" and not read_signals(customer).dnc:
                 # "ไว้ค่อยโทรมาใหม่" is the opposite of "don't call": never block a number on a guess.
                 out["end_reason"] = "callback" if read_signals(customer).not_convenient else "refused"
+            reached = self.check.identity == "confirmed" or any(
+                u.get("item") == "identity" and u.get("status") == "confirmed" for u in out["updates"]
+            )
+            if out["end_call"] and out["end_reason"] == "completed" and not reached:
+                # "ไม่ใช่ครับ ที่นี่ร้านข้าวมันไก่": nothing was completed with someone we never reached.
+                other = self.check.identity == "wrong_person" or self._someone_else()
+                out["end_reason"] = "wrong_person" if other or signals.negative or signals.wrong_person else "refused"
             if out["end_call"] and _asks(out["reply"]):
                 # "ไม่ทราบว่าสะดวกให้ติดต่อกลับช่วงไหนดีคะ" + END: hanging up on our own question (19 Oct call).
                 # Keep the line open for the answer; the close comes with the next turn.
@@ -655,6 +717,15 @@ class CallAgent:
                 self._set_consent("granted")
         last = " ".join(self.last_reply)
         self._settle_score(customer, last)
+        if self.repair:
+            self._settle_car(customer, last)
+        if not c.available and c.identity == "confirmed":
+            # "ผมสมชายครับ สะดวกคุยครับ" in the first breath, before being asked (2 Nov suite: asked at the end).
+            said = [t for who, t in self.history if who == "customer"]
+            c.available = any(
+                re.search(r"สะดวก(คุย|ครับ|ค่ะ)", t) and not (read_signals(t).not_convenient or "ไม่สะดวก" in t)
+                for t in said
+            )
         fixing = s.negative or s.correction or bool(re.search(r"ผิด|ที่ถูก|แก้ให้|ไม่ถูก", customer))
         if fixing and not s.question:
             # "ไม่ใช่ครับ ชดเชยรายวันต้องวันละพัน" / "อีเมลที่ถูกคือ…" right after a group: the named item is disputed,
@@ -689,6 +760,158 @@ class CallAgent:
         """Someone other than the customer has spoken on this call ("พ่อไม่อยู่ครับ"): who is on the line is
         then the model's to work out from the whole conversation, never a plain "ครับ"'s to settle."""
         return any(_OTHER_PERSON.search(t) for who, t in self.history if who == "customer")
+
+    @property
+    def cars(self) -> RepairEngine:
+        """The claims follow-up engine: its cars and their approved lines."""
+        assert isinstance(self.base, RepairEngine)
+        return self.base
+
+    def _car_in_question(self, last: str) -> Item | None:
+        """The car the last turn asked about: the one whose plate it said, or the one whose details are
+        still being asked ("คาดว่าจะเสร็จวันที่เท่าไรคะ" names no plate)."""
+        cars = [i for i in self.items if i.kind == "status"]
+        if len(cars) == 1:
+            return cars[0]
+        flat = _flat(last)
+        named = [i for i in cars if _flat(" ".join(i.label.split()[:2])) in flat]
+        if len(named) == 1:
+            return named[0]
+        if named:
+            return None
+        started = (i for i in cars if not self._done(i) and self.result.vehicles[i.index].status != "not_asked")
+        return next(started, None)
+
+    def _settle_car(self, customer: str, last: str) -> None:
+        """What a plain answer about the car just asked settles, whatever the model remembers to report:
+        "เสร็จแล้วครับ" to "ทะเบียน 1กข 1234 ซ่อมเสร็จหรือยังคะ", or the date the next question asked for.
+        Without it a forgotten UPDATE asks the same car again."""
+        if re.search(r"คันที่|คันแรก|คันสุดท้าย|คันอื่น|ทั้ง(สอง|สาม|หมด)|ทุกคัน", customer):
+            return  # several cars in one answer: the model reports each
+        item = self._car_in_question(last)
+        if item is None:
+            return
+        heard = _flat(customer)
+        others = [i for i in self.items if i is not item and i.label.split()[1] in heard]
+        if others:
+            return  # "1กข 1234 กับ 2ขค 5678 เสร็จแล้ว ส่วน 3ฒพ 9012 ยังซ่อม" names other cars: the model reports each
+        s = read_signals(customer)
+        row = self.result.vehicles[item.index]
+        dated, unsure = bool(WHEN.search(customer)), bool(UNSURE.search(customer))
+        # "ยังไม่รู้ว่าจะเสร็จเมื่อไหร่" reads as a question but says the car is in repair; only a question with
+        # nothing about the car ("ต้องจ่ายค่าเสียหายส่วนแรกไหม") settles nothing.
+        if s.question and not (car_status(customer, row.status) or dated or unsure):
+            return
+        if self.campaign.party == "garage":
+            if row.status == "in_repair" and row.completion_text is None and (dated or unsure):
+                self._set_car(item, "completion", customer if dated else "ไม่ระบุ")
+            elif row.status == "booked" and row.appointment_text is None and (dated or unsure):
+                self._set_car(item, "appointment", customer if dated else "ไม่ระบุ")
+            elif row.status in ("not_asked", "awaiting_customer"):
+                status = car_status(customer, row.status)
+                if row.status == "awaiting_customer" and status is None and s.affirm:
+                    status = "booked"  # "ครับ นัดแล้ว" / "โทรแล้วครับ" to "ได้โทรนัดลูกค้าแล้วหรือยังคะ"
+                if status is not None:
+                    self._set_car(item, status, customer)
+                if status == "in_repair" and unsure and not dated:
+                    self._set_car(item, "completion", "ไม่ระบุ")  # "รออะไหล่ ยังไม่รู้ว่าจะเสร็จเมื่อไหร่"
+        elif row.status in ("not_asked", "not_ready") and (
+            re.search(r"(สะดวก|นำรถ|เข้าซ่อม|เดือน).*(วันไหน|ช่วงไหน|เมื่อไหร่|เดือนไหน)", last)
+            or (re.search(r"(เอา|นำ)รถ", customer) and DAY.search(customer))  # "สะดวกเอารถ 15 พ.ย." unasked
+        ):
+            not_ready = s.not_convenient or bool(re.search(r"ยังไม่(สะดวก|พร้อม|ว่าง|ได้)|ไม่ว่าง|ไว้ก่อน", customer))
+            if DAY.search(customer) and not not_ready:
+                self._set_car(item, "date_given", customer)
+            elif dated:
+                # "น่าจะเดือนธันวาคม" is when, roughly, not a day the garage can book: not ready yet, month noted.
+                self._set_car(item, "not_ready", customer)
+                self._set_car(item, "appointment", customer)
+            elif not_ready or unsure:
+                self._set_car(item, "not_ready", customer)
+
+    def _set_car(self, item: Item, status: str, note: str, by_model: bool = False) -> None:
+        row: VehicleResult = self.result.vehicles[item.index]
+        if by_model and item.index in self.rule_cars and status in _CAR_STATUSES:
+            return  # the customer's own words settled this car this turn; the model's status may not undo it
+        customer_call = {"date_given", "not_ready"}
+        if status in _CAR_STATUSES and (status in customer_call) != (self.campaign.party == "customer"):
+            return  # a garage's car is never "not ready", a customer never "booked" (2 Nov suite crash)
+        if status == "appointment" and row.status == "not_asked" and self.campaign.party == "customer":
+            status = "date_given"  # a day to bring the car in is the answer to the call's question
+        if not by_model and status in _CAR_STATUSES:
+            self.rule_cars.add(item.index)
+        if status in ("completion", "appointment", "pickup"):
+            setattr(row, f"{status}_text", note or "ไม่ระบุ")
+            if self._done(item):
+                self.car_acks.append(self._car_ack(item))
+            return
+        if row.status == status:
+            return
+        row.status, row.statement = status, note  # type: ignore[assignment]
+        if WHEN.search(note):
+            if status == "in_repair":
+                row.completion_text = row.completion_text or note
+            elif status in ("booked", "date_given", "not_ready"):
+                row.appointment_text = row.appointment_text or note
+        if status == "date_given":
+            row.appointment_text = note  # a day replaces the rough month said before
+        vehicle = self.cars.vehicles[item.index]
+        who = f"คุณ{vehicle.customer_name} ทะเบียน {vehicle.plate} เคลม {vehicle.claim_no}"
+        if status == "customer_unreachable":
+            self._task("customer_contact", "อู่ติดต่อลูกค้าไม่ได้หรือยังไม่ได้นัดหมาย: บริษัทติดต่อลูกค้าโดยตรง", who)
+        elif status == "not_at_garage":
+            self._task("question_follow_up", "อู่แจ้งว่าไม่มีรถคันนี้ ให้เจ้าหน้าที่ตรวจสอบเคลม", f"{who}: {note}")
+        elif status == "date_given":
+            self._task("garage_notify", "ลูกค้าแจ้งวันที่สะดวกนำรถเข้าซ่อม: แจ้งอู่ให้ติดต่อกลับยืนยัน", f"{who}: {note}")
+        if self._done(item):
+            self.car_acks.append(self._car_ack(item))
+
+    def _car_ack(self, item: Item) -> str:
+        """The approved line that closes a car (KPI script), with its plate."""
+        status = self.result.vehicles[item.index].status
+        key = {
+            "repaired": "car_repaired",
+            "in_repair": "car_completion_ack",
+            "booked": "car_dates_ack",
+            "customer_unreachable": "car_unreachable",
+            "not_at_garage": "unknown_answer",
+            "date_given": "car_date_ack",
+            "not_ready": "car_not_ready",
+        }[status]
+        return self.cars.plate_line(key, item.index)
+
+    def _car_line(self, item: Item) -> str:
+        """The approved question the car needs next."""
+        row = self.result.vehicles[item.index]
+        key = {"in_repair": "car_ask_completion", "awaiting_customer": "car_ask_contacted", "booked": "car_ask_dates"}
+        line = self.cars.plate_line(key.get(row.status, "car_ask"), item.index)
+        if row.status == "not_asked" and self.campaign.party == "customer":
+            line = f"{self.cars.plate_line('car_reason', item.index)} {line}"
+        return line
+
+    def _car_state(self, item: Item) -> str:
+        row = self.result.vehicles[item.index]
+        said = {
+            "not_asked": "ยังไม่ได้ถาม",
+            "repaired": "ซ่อมเสร็จแล้ว",
+            "in_repair": "อยู่ระหว่างซ่อม",
+            "awaiting_customer": "ลูกค้ายังไม่นำรถเข้า/รอนัด",
+            "booked": "อู่นัดลูกค้าแล้ว",
+            "customer_unreachable": "อู่ติดต่อลูกค้าไม่ได้",
+            "not_at_garage": "อู่ไม่มีรถคันนี้",
+            "date_given": "ลูกค้าบอกวันที่สะดวกแล้ว",
+            "not_ready": "ลูกค้ายังไม่สะดวกเข้าซ่อม",
+        }[row.status]
+        dates = [
+            f"{label} {text}"
+            for label, text in (
+                ("คาดว่าเสร็จ:", row.completion_text),
+                ("วันนัด/วันที่สะดวก:", row.appointment_text),
+                ("วันรับรถ:", row.pickup_text),
+            )
+            if text
+        ]
+        return " ".join([said, *dates])
 
     def _settle_score(self, customer: str, last: str) -> None:
         """A plain score to the score question just asked ("ให้ 3 ครับ") is that question's answer, and "ไม่มี
@@ -838,15 +1061,27 @@ class CallAgent:
     def checklist_text(self) -> str:
         c = self.check
         name = self.vars.get("customer_name")
+        garage = self.campaign.party == "garage"
         lines = [
-            f"{'✓' if c.identity == 'confirmed' else '•'} identity: ยืนยันว่ากำลังเรียนสายกับคุณ{name}",
-            f"{'✓' if c.ai_disclosed else '•'} แนะนำตัวว่า ดิฉันน้องเคพีไอ ผู้ช่วย AI บอกว่าโทรมาเรื่องอะไร ใช้เวลาไม่นาน",
-            f"{'✓' if c.available else '•'} availability: ถามอย่างสุภาพว่าตอนนี้สะดวกคุยไหม",
-            f"{'✓' if c.notice else '•'} แจ้งการบันทึกเสียงและขอความยินยอม (ต้องพูดตามนี้ทุกคำ ก่อนเข้าเนื้อหา)",
-            f"{'✓' if c.consent != 'pending' else '•'} recording: คำตอบเรื่องยินยอมให้บันทึกเสียง"
-            + {"granted": " (ยินยอม)", "declined": " (ไม่ยินยอม: บันทึกเฉพาะข้อความ)", "pending": ""}[c.consent],
+            f"{'✓' if c.identity == 'confirmed' else '•'} identity: "
+            + (f"ยืนยันว่าโทรถึง{name}" if garage else f"ยืนยันว่ากำลังเรียนสายกับคุณ{name}"),
+            f"{'✓' if c.ai_disclosed else '•'} แนะนำตัวว่า ดิฉันน้องเคพีไอ ผู้ช่วย AI บอกว่าโทรมาเรื่องอะไร"
+            + (f" (ขอสอบถามข้อมูลรถจำนวน {self.vars.get('vehicle_count')} คัน)" if garage else " ใช้เวลาไม่นาน"),
         ]
+        if not garage:
+            lines.append(f"{'✓' if c.available else '•'} availability: ถามอย่างสุภาพว่าตอนนี้สะดวกคุยไหม")
+        if self.campaign.recording_notice:
+            lines += [
+                f"{'✓' if c.notice else '•'} แจ้งการบันทึกเสียงและขอความยินยอม (ต้องพูดตามนี้ทุกคำ ก่อนเข้าเนื้อหา)",
+                f"{'✓' if c.consent != 'pending' else '•'} recording: คำตอบเรื่องยินยอมให้บันทึกเสียง"
+                + {"granted": " (ยินยอม)", "declined": " (ไม่ยินยอม: บันทึกเฉพาะข้อความ)", "pending": ""}[c.consent],
+            ]
         for item in self.items:
+            if item.kind == "status":
+                mark = "✓" if self._done(item) else "•"
+                car = self.cars.vehicles[item.index]
+                lines.append(f"{mark} {item.id}: รถทะเบียน {item.label} ({car.car}) — {self._car_state(item)}")
+                continue
             mark = "✓" if self._done(item) else "•"
             if item.kind == "fact":
                 fields = ", ".join(item.fields)
@@ -869,6 +1104,10 @@ class CallAgent:
         if isinstance(self.base, PAEngine):
             lines.append(f"{'✓' if c.free_look else '•'} แจ้งสิทธิยกเลิกภายใน 30 วัน (ต้องพูดตามนี้ทุกคำ)")
             lines.append(f"{'✓' if c.questions_asked else '•'} questions: ถามว่ามีคำถามเพิ่มเติมไหม แล้วปิดสาย")
+        elif self.repair and not garage:
+            lines.append(f"{'✓' if c.questions_asked else '•'} questions: ถามว่ามีอะไรสอบถามเพิ่มเติมไหม แล้วปิดสาย")
+        elif garage:
+            lines.append("• ครบทุกคันแล้ว ขอบคุณ แล้วปิดสาย")
         else:
             lines.append(f"{'✓' if c.final_comment else '•'} final_comment: ขอข้อเสนอแนะเพิ่มเติม แล้วปิดสาย")
         lines.append(f"\nขั้นถัดไป: {self.next_step()}")
@@ -879,6 +1118,9 @@ class CallAgent:
             lines.append("ลูกค้าบอกเองแล้วว่ายินยอมให้บันทึกเสียง: แจ้งว่าบันทึกเสียงเพื่ออะไรสั้นๆ ขอบพระคุณที่ยินยอม ไม่ต้องถามซ้ำ")
         if self.decline_ack_due:
             lines.append(f"ลูกค้าเพิ่งไม่ยินยอมให้บันทึกเสียง: ตานี้แจ้งก่อนว่า '{self._peek_line('recording_declined')}' แล้วไปต่อ")
+        if self.car_acks:
+            acks = " / ".join(self.car_acks)
+            lines.append(f"ระบบบันทึกคำตอบเรื่องรถแล้ว: ตานี้รับทราบด้วยใจความนี้ก่อน (พูดด้วยคำของคุณเอง) แล้วไปขั้นถัดไป: {acks}")
         if c.feedback_pending:
             q = next(i for i in self.items if i.id == c.feedback_pending)
             lines.append(f"ลูกค้าให้คะแนน {q.id} ต่ำ: ขออภัยแล้วถามสั้นๆ ว่าอยากให้ปรับปรุงตรงไหน เช่น {q.feedback_question}")
@@ -888,6 +1130,8 @@ class CallAgent:
         c = self.check
         if c.identity != "confirmed":
             return "ยืนยันว่ากำลังเรียนสายกับลูกค้าถูกคน"
+        if not c.ai_disclosed and self.campaign.party == "garage":
+            return f"แนะนำตัวสั้นๆ ว่า ดิฉันน้องเคพีไอ ผู้ช่วย AI แล้วบอกว่า{self._peek_line('intro')} แล้วถามคันแรก"
         if not c.ai_disclosed:
             return "แนะนำตัวสั้นๆ ว่า ดิฉันน้องเคพีไอ ผู้ช่วย AI บอกว่าโทรมาเรื่องอะไร แล้วถามว่าไม่ทราบว่าตอนนี้สะดวกคุยไหม"
         if not c.available:
@@ -903,12 +1147,20 @@ class CallAgent:
             if not self._done(item):
                 if item.kind == "fact":
                     return f"ทวนกลุ่ม {item.id} ({item.label}) ทั้งกลุ่มในตาเดียว แล้วถามยืนยันครั้งเดียว"
+                if item.kind == "status":
+                    first = all(self.result.vehicles[i.index].status == "not_asked" for i in self.items)
+                    lead = f"บอกว่า{self._peek_line('intro')} แล้ว" if first and self.campaign.party == "garage" else ""
+                    return f"{lead}ถาม {item.id} (ทะเบียน {item.label}) ตามใจความนี้: {self._car_line(item)}"
                 return f"{item.id}: {item.label}"
         if isinstance(self.base, PAEngine):
             if not c.free_look:
                 return "แจ้งสิทธิยกเลิกภายใน 30 วัน"
             if not c.questions_asked:
                 return "ถามว่ามีคำถามเพิ่มเติมไหม ถ้าไม่มี ปิดสายด้วย end_reason completed"
+        elif self.repair:
+            if self.campaign.party == "customer" and not c.questions_asked:
+                return "ถามว่ามีอะไรสอบถามเพิ่มเติมไหม ถ้าไม่มี ขอบคุณแล้วปิดสายด้วย end_reason completed"
+            return "ครบทุกคันแล้ว ขอบคุณแล้วปิดสายด้วย end_reason completed (ไม่ต้องบอกเบอร์ศูนย์บริการ)"
         elif not c.final_comment:
             return "ขอข้อเสนอแนะเพิ่มเติม แล้วปิดสายด้วย end_reason completed"
         return "ทุกข้อครบแล้ว ปิดสายอย่างสุภาพ ขอบพระคุณลูกค้า บอกช่องทางติดต่อศูนย์บริการ (end_reason completed)"
@@ -936,10 +1188,17 @@ class CallAgent:
         facts = " ".join(self.base.fact_sheet())
         if _MARKUP.search(reply):
             return "ห้ามใช้ Markdown ลิงก์ หรือ https"
-        if any(w in reply for w in _BANNED) or _MALE_PRONOUN.search(reply) or _SELF_AS_NONG.search(reply):
+        # "อู่คู่สัญญา" (a partner garage, KPI's own wording) is not a promise.
+        unpromised = reply.replace("คู่สัญญา", "")
+        if any(w in unpromised for w in _BANNED) or _MALE_PRONOUN.search(reply) or _SELF_AS_NONG.search(reply):
             return "ต้องพูดแบบผู้หญิง เรียกตัวเองว่าดิฉัน ห้ามใช้ ครับ/ผม/น้อง และห้ามสัญญาหรือรับประกัน"
         if reply == " ".join(self.last_reply):
             return "ห้ามพูดประโยคเดิมซ้ำ ให้พูดด้วยคำใหม่ หรือขออภัยแล้วถามใหม่อย่างสุภาพ"
+        before = [t for who, t in self.history if who == "bot"]
+        sorry = re.compile(r"^(ต้อง)?(ขออภัย|ขอโทษ)")
+        if before and sorry.match(lines[0]) and sorry.match(before[-1]):
+            # 22 Oct test: each interruption opened with "ขออภัยค่ะ" and the same topic again, heard as a loop.
+            return "ไม่ต้องขอโทษซ้ำทุกตา ตอบสิ่งที่ลูกค้าพูดหรือถามได้เลย"
         if self._rude_reask(lines):
             return "ถามซ้ำต้องมีคำนำที่สุภาพ เช่น 'ขอโทษนะคะ ไม่ทราบว่า...' ห้ามถามห้วนๆ"
         said_by_customer = " ".join(t for who, t in self.history if who == "customer")
@@ -974,6 +1233,8 @@ class CallAgent:
             for w in _CLAIM_WORDS
             if w in policy and w not in approved and w not in customer and not _said_in(kb, policy, w)
         ]
+        if self.repair:
+            claims = []  # no policy conditions in a repair follow-up ("ยังไม่ได้นัด" is the garage's news)
         if claims:
             return f"ห้ามพูดเงื่อนไขหรือข้อจำกัดที่ไม่มีในข้อมูล ({', '.join(claims)})"
         if re.search(r"จำเป็นต้อง(มีการ)?บันทึก|ต้องบันทึกเสียงทุก|ไม่สามารถ(งด|ยกเลิก)การบันทึก", reply):
@@ -1017,7 +1278,9 @@ class CallAgent:
         ):
             # Policy details only to the customer: a relative was read the coverage in the 19 Oct suite.
             return "ยังไม่ได้ยืนยันว่าเป็นลูกค้าตัวจริง ห้ามบอกข้อมูลกรมธรรม์ ถามยืนยันตัวตนก่อน"
-        asks_score = isinstance(self.base, SurveyEngine) and "คะแนน" in reply
+        asks_score = (isinstance(self.base, SurveyEngine) and "คะแนน" in reply) or (
+            self.repair and bool(re.search(r"สะดวกนำรถ|เข้าซ่อม(ใน)?ช่วง|วันไหน", reply))
+        )
         if (reads_policy or asks_score) and not c.notice and not _tells_recording(reply):
             # Even when the customer has already said "บันทึกได้": the notice is still owed (19 Oct test).
             return "ยังไม่ได้แจ้งการบันทึกเสียงและขอความยินยอม แจ้งก่อน ห้ามเข้าเนื้อหาก่อน"
@@ -1077,6 +1340,9 @@ class CallAgent:
             if left and (self.close_blocked == 0 or not asked):
                 self.close_blocked += 1
                 return f"ยังปิดสายไม่ได้ ยังเหลือ: {', '.join(left)} ถ้าลูกค้าตอบแล้วในบทสนทนา ให้ UPDATE ข้อนั้น"
+        if self.consent_offered and not c.notice and _asks_consent(reply):
+            # "ยินยอมครับ ผมบอกไปแล้วเมื่อกี้" (2 Nov suite): the customer agreed before the notice.
+            return "ลูกค้ายินยอมให้บันทึกเสียงแล้ว แจ้งสั้นๆ ว่าบันทึกเพื่ออะไรและขอบพระคุณ ห้ามถามซ้ำ"
         return None
 
     def _asked(self, item_id: str) -> bool:
@@ -1088,6 +1354,8 @@ class CallAgent:
         if item.kind == "fact":
             return any(v in self.check.heard for v in item.values)
         said = _flat(" ".join(t for who, t in self.history if who == "bot"))
+        if item.kind == "status":
+            return _flat(" ".join(item.label.split()[:2])) in said  # the plate, with or without the province
         return _flat(item.label)[:12] in said
 
     def _asks_answered_score(self, lines: list[str], out: dict[str, Any]) -> str | None:
@@ -1132,6 +1400,9 @@ class CallAgent:
         4-character runs appear in the call's facts, the knowledge or the approved wording.
         Measured 15 Oct on 36 policy sentences: an invented claim scored 0.43, every grounded one 0.57+."""
         source = self.approved_flat + _squash(customer)
+        if self.repair:
+            # Dates and plans the garage or customer gave earlier may be said back in a later turn.
+            source += _squash(" ".join(t for who, t in self.history if who == "customer"))
         for sentence in (x for line in lines for x in re.split(r"(?<=ค่ะ)\s+|(?<=คะ)\s+", line)):
             flat = _squash(sentence)
             if not _POLICY_TALK.search(sentence) or len(flat) < 12:
@@ -1170,6 +1441,7 @@ class CallAgent:
             item = next((i for i in self.items if i.id == name), None)
             if settled_only and not (
                 name in ("identity", "availability")
+                or (item is not None and item.kind == "status")
                 or (
                     item is not None
                     and item.kind == "score"
@@ -1181,6 +1453,23 @@ class CallAgent:
                 continue  # from a rejected reply: only what the customer plainly said
             if name == "identity" and status == "confirmed" and _OTHER_PERSON.search(customer):
                 continue  # "พ่อไม่อยู่ครับ" is someone else on the line, never the customer
+            if item is not None and item.kind == "status":
+                when = bool(WHEN.search(customer))
+                if status == "date_given" and not when:
+                    # Reported a turn late ("ครับผม" after the date was said back): the day is in an earlier answer.
+                    said = [t for who, t in self.history if who == "customer" and DAY.search(t)]
+                    if said:
+                        when, note = True, said[-1]
+                about_car = when or car_status(customer, self.result.vehicles[item.index].status) is not None
+                asking = (heard.question or heard.has_question) and not heard.negative
+                if status in _CAR_STATUSES and asking and not about_car:
+                    continue  # "ต้องจ่ายค่าเสียหายส่วนแรกไหม" says nothing about the car (2 Nov suite)
+                unready = heard.not_convenient or bool(re.search(r"ยังไม่(สะดวก|พร้อม|ว่าง)|ไม่ว่าง|ไว้ก่อน", customer))
+                if (status == "date_given" and not when) or (status == "not_ready" and not (unready or when)):
+                    continue  # "อู่ไม่เคยโทรมาเลย" is a complaint, not "not ready" (2 Nov suite)
+                if status in _CAR_STATUSES or status in ("completion", "appointment", "pickup"):
+                    self._set_car(item, status, note or customer, by_model=True)
+                continue
             if name == "identity" and status in ("confirmed", "wrong_person"):
                 c.identity = status  # type: ignore[assignment]
                 self.result.identity_result = "confirmed" if status == "confirmed" else "wrong_person"
@@ -1228,6 +1517,11 @@ class CallAgent:
         answered_dates = self.date_hint and any(d in " ".join(out.get("reply") or []) for d in _numbers(self.date_hint))
         if follow.get("type") == "question_follow_up" and answered_dates:
             follow = {}  # "ยกเลิกได้ถึงวันไหน" answered with the worked-out date: nothing for staff
+        promised = re.search(r"เจ้าหน้าที่.{0,12}ติดต่อกลับ", " ".join(out.get("reply") or []))
+        noted = any(t.type == "question_follow_up" for t in self.result.tasks)
+        if follow.get("type") in (None, "none") and promised and (heard.question or heard.has_question) and not noted:
+            # "ขออนุญาตให้เจ้าหน้าที่ติดต่อกลับ" said without FOLLOW_UP (2 Nov suite): a promise needs a task.
+            follow = {"type": "question_follow_up", "detail": customer}
         if follow.get("type") not in (None, "none"):
             reason = {"question_follow_up": "คำถามที่ยังไม่มีคำตอบที่อนุมัติ"}.get(follow["type"], "ลูกค้าขอให้ติดต่อกลับ")
             self._task(follow["type"], reason, str(follow.get("detail") or customer))
@@ -1348,6 +1642,13 @@ class CallAgent:
         return item.id in self.check.heard_values or any(_flat(p) in said for p in parts)
 
     def _done(self, item: Item) -> bool:
+        if item.kind == "status":
+            row = self.result.vehicles[item.index]
+            if row.status == "in_repair":
+                return row.completion_text is not None
+            if row.status == "booked":
+                return row.appointment_text is not None
+            return row.status not in ("not_asked", "awaiting_customer")
         if item.kind == "fact":
             return all(f.status != "not_reviewed" for f in self.result.policy_fields if f.field in item.fields)
         return self.check.status[item.id] != "pending"
@@ -1380,6 +1681,9 @@ class CallAgent:
         self.state.outcome = self._complete_outcome()
 
     def _complete_outcome(self) -> Outcome:
+        if self.repair:
+            done = all(self._done(i) for i in self.items)
+            return Outcome.FOLLOWUP_COMPLETED if done else Outcome.FOLLOWUP_PARTIAL
         if isinstance(self.base, SurveyEngine):
             asked = {i.id for i in self.items}  # questions that do not apply to this case are never asked
             answered = all(
@@ -1393,6 +1697,8 @@ class CallAgent:
         return Outcome.CONFIRMED_WITH_DISCREPANCY if disputed else Outcome.POLICY_CONFIRMED
 
     def _partial_outcome(self) -> Outcome:
+        if self.repair:
+            return Outcome.FOLLOWUP_PARTIAL
         return Outcome.SURVEY_PARTIAL if isinstance(self.base, SurveyEngine) else Outcome.POLICY_PARTIAL
 
     def _awaiting(self) -> str:
@@ -1401,6 +1707,8 @@ class CallAgent:
         if c.feedback_pending:
             return f"feedback:{c.feedback_pending}"
         if all(self._done(i) for i in self.items) and c.notice:
+            if self.repair:
+                return "questions" if self.campaign.party == "customer" else "conversation"
             return "final_comment" if isinstance(self.base, SurveyEngine) else "questions"
         return "conversation"
 
@@ -1456,7 +1764,8 @@ class CallAgent:
             low, high = pending_score.scale
             scale = f"ให้คะแนนตั้งแต่ {low} ถึง {high} ค่ะ โดย {high} คือพึงพอใจมากที่สุด และ {low} คือน้อยที่สุดนะคะ"
             return self._say([scale, *lines] if lines != self.last_reply else [scale], "fallback")
-        if s.question and not s.affirm:
+        if s.question and (not s.affirm or len(_flat(customer)) > 20):
+            # "สะดวกครับ ถามหน่อยครับว่า…" is a question, whatever the yes in front of it.
             self._task("question_follow_up", "คำถามที่ยังไม่มีคำตอบที่อนุมัติ", customer)
             unknown = self._line("unknown_answer")
             lines = [unknown] if lines == self.last_reply else [unknown, *lines]
@@ -1478,10 +1787,18 @@ class CallAgent:
             return [convey]
         if c.notice and c.consent == "pending":
             return [" ".join(x.text for x in self.base._seg("recording_consent"))]
+        if c.identity != "confirmed" and self._someone_else():
+            return [self._line("ask_callback_time")]  # "ภรรยาค่ะ สามีไม่อยู่": never "is this Khun Somchai?" again
+        if c.identity != "confirmed" and self.campaign.party == "garage":
+            return [self._line("identity_recheck")]
         if c.notice:
             pending = next((i for i in self.items if not self._done(i)), None)
+            if pending is not None and pending.kind == "status":
+                return [*self.car_acks, self._car_line(pending)]
             if pending is not None:
                 return [pending.approved]
+            if self.repair:
+                return [*self.car_acks, self._line("closing")]
             key = "more_questions" if isinstance(self.base, PAEngine) else "final_comment"
             return [self._line(key)]
         if c.identity != "confirmed":
@@ -1491,8 +1808,43 @@ class CallAgent:
         return [x.text for x in self.base._seg("intro")]
 
 
+_POLICY_EXAMPLE = """ตัวอย่าง (ลูกค้าเพิ่งยืนยันกลุ่มความคุ้มครอง)
+SAY: ส่วนเบี้ยประกันภัย 2,000 บาทต่อปี ชำระผ่านบัตรเครดิตเรียบร้อยแล้ว และกรมธรรม์เริ่มคุ้มครองวันที่ 15 ตุลาคม 2569 เวลา 00.01 น. นะคะ
+SAY: ส่วนนี้ถูกต้องไหมคะ
+UPDATE: coverage confirmed
+END: none"""
+_CAR_CODES = """- รถแต่ละคัน (รหัส car1 car2 … ในรายการ) สถานะ: repaired (ซ่อมเสร็จแล้ว) | in_repair (อยู่ระหว่างซ่อม)
+  | awaiting_customer (ลูกค้ายังไม่นำรถเข้าจอด หรือรอนัดหมายเข้าซ่อม) | booked (อู่นัดหมายลูกค้าแล้ว)
+  | customer_unreachable (อู่ติดต่อลูกค้าไม่ได้ หรือยังไม่ได้นัดหมาย) | not_at_garage (อู่ไม่มีรถคันนี้)
+  | date_given (ลูกค้าบอกวันที่สะดวกนำรถเข้าซ่อม) | not_ready (ลูกค้ายังไม่สะดวกเข้าซ่อม)
+  วันที่ที่ได้ยิน ใส่หลัง | ตามคำที่ได้ยิน: completion (วันที่คาดว่าจะซ่อมเสร็จ) appointment (วันนัดเข้าซ่อม หรือวันที่ลูกค้าสะดวก)
+  pickup (วันส่งมอบรถหรือวันรับรถ) เช่น "UPDATE: car2 completion | ประมาณวันที่ 10 พฤศจิกายน"
+  ถ้าไม่ทราบวันที่ ใส่ "ไม่ระบุ" หลัง | ตอบหลายคันในตาเดียว ให้ UPDATE ทุกคันที่ได้คำตอบ"""
+_CAR_EXAMPLE = """ตัวอย่าง (อู่เพิ่งบอกว่ารถคันแรกซ่อมเสร็จแล้ว)
+SAY: ขอบคุณค่ะ หากซ่อมเสร็จเรียบร้อยแล้ว รบกวนดำเนินการตั้งเบิกเคลมในระบบให้ด้วยนะคะ
+SAY: <short pause> คันถัดไป รบกวนตรวจสอบรถทะเบียน 2ขค 5678 นนทบุรี ให้หน่อยนะคะ ว่าขณะนี้ซ่อมเสร็จเรียบร้อยแล้วหรือยังคะ
+UPDATE: car1 repaired
+END: none"""
+_CALLEE = {"garage": "อู่คู่สัญญาของบริษัท (ผู้รับสายคือเจ้าหน้าที่อู่)", "customer": "ลูกค้า"}
+
+
 def system_prompt(campaign: str) -> str:
-    return _SYSTEM_CACHE.setdefault(campaign, SYSTEM_PROMPT.format(knowledge=knowledge(campaign)))
+    if campaign in _SYSTEM_CACHE:
+        return _SYSTEM_CACHE[campaign]
+    from kpi_voicebot.campaigns import REPAIR_CAMPAIGNS, load_campaign
+    from kpi_voicebot.models import CampaignId
+
+    spec = load_campaign(CampaignId(campaign))
+    repair = spec.id in REPAIR_CAMPAIGNS
+    return _SYSTEM_CACHE.setdefault(
+        campaign,
+        SYSTEM_PROMPT.format(
+            knowledge=knowledge(campaign),
+            callee=_CALLEE[spec.party],
+            codes=_CAR_CODES + "\n" if repair else "",
+            example=_CAR_EXAMPLE if repair else _POLICY_EXAMPLE,
+        ),
+    )
 
 
 _SYSTEM_CACHE: dict[str, str] = {}
@@ -1524,6 +1876,18 @@ def _items(base: BaseEngine) -> list[Item]:
                 )
             )
         return out
+    if isinstance(base, RepairEngine):
+        return [
+            Item(
+                id=f"car{n + 1}",
+                label=v.plate,
+                kind="status",
+                approved=base.plate_line("car_ask", n),
+                values=[v.plate],
+                index=n,
+            )
+            for n, v in enumerate(base.vehicles)
+        ]
     assert isinstance(base, SurveyEngine)
     surveyor = getattr(base.case, "surveyor_attended", None)
     return [

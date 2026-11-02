@@ -164,6 +164,20 @@ def _house_number(m: re.Match[str]) -> str:
     return f"{number_words(int(m.group(1)))}ทับ{number_words(int(m.group(2)))}"
 
 
+# "1กข 1234" after ทะเบียน: a car plate.
+_PLATE = re.compile(r"(?<![ก-๙\d])(\d?)\s?([ก-ฮ]{1,2})\s?(\d{1,4})(?![\d,.])")
+
+
+def _plate(m: re.Match[str]) -> str:
+    """A plate is read the way Thai staff read one over the phone: digits one by one and letters by name
+    (1กข 1234 → หนึ่ง กอ ขอ หนึ่ง สอง สาม สี่), never หนึ่งพันสองร้อยสามสิบสี่."""
+    if "ทะเบียน" not in m.string[max(0, m.start() - 30) : m.start()]:
+        return m.group(0)
+    lead, letters, number = m.groups()
+    words = [*(_DIGITS[int(d)] for d in lead), *(f"{c}อ" for c in letters), *(_DIGITS[int(d)] for d in number)]
+    return " ".join(words)
+
+
 # Words that mark an address; a five-digit number after one is a postcode.
 _ADDRESS = re.compile(r"แขวง|เขต|ตำบล|ต\.|อำเภอ|อ\.|จังหวัด|จ\.|กรุงเทพ|ถนน|ถ\.|ซอย|ซ\.|หมู่|บ้านเลขที่|ที่อยู่")
 _AMOUNT_UNIT = re.compile(r"\s*(?:บาท|วัน|เดือน|ปี|คน|ครั้ง|ราย|ฉบับ|%|เปอร์เซ็นต์)")
@@ -222,6 +236,7 @@ def _speakable(text: str) -> str:
     t = re.sub(r"\bQR\s*Code\b", "คิวอาร์โค้ด", t, flags=re.IGNORECASE)
     for acronym, spoken in _ACRONYMS.items():
         t = re.sub(rf"(?<![A-Za-z]){acronym}(?![A-Za-z])", spoken, t)
+    t = _PLATE.sub(_plate, t)
     t = re.sub(r"(?<![\d/])(\d{1,5})/(\d{1,4})(?![\d/])", _house_number, t)
     t = re.sub(r"(?<![\d,.])[1-9]\d{4}(?![\d,.])", _postcode, t)
     t = re.sub(r"\d[\d,]*(?:\.\d+)?", _amount, t)

@@ -1,4 +1,4 @@
-"""Speech recognition: JaiASR-Flash-v1.0 (JTS), streaming over WebSocket.
+"""Speech recognition: JaiASR (JTS, qwen3-asr-th-ft), streaming over WebSocket.
 
 Protocol (JaiASR API doc): send `start`, wait for `ready`, stream 16 kHz 16-bit mono PCM in
 0.1–0.5 s frames, receive `partial` (replaces the previous partial of the same segment),
@@ -79,10 +79,16 @@ class JaiASRStream:
                     "language": language,
                     "context": context,
                     "chunk_size_sec": self.settings.asr_chunk_seconds,
+                    "unfixed_chunk_num": self.settings.jaiasr_unfixed_chunk_num,
+                    "unfixed_token_num": self.settings.jaiasr_unfixed_token_num,
+                    # Partials drive barge-in. The second pass drops quiet phone-leg answers
+                    # ("ครับ", "สะดวกครับ" came back empty), so it stays off.
+                    "partials": True,
+                    "second_pass": False,
                 }
             )
         )
-        reply = json.loads(await asyncio.wait_for(self._ws.recv(), 10))
+        reply = json.loads(await asyncio.wait_for(self._ws.recv(), self.settings.jaiasr_ready_timeout_seconds))
         if reply.get("type") != "ready":
             raise ASRError(f"JaiASR did not start: {reply.get('message') or reply.get('type')}")
         self.ready = reply

@@ -1,0 +1,82 @@
+# Claims follow-up 1: call a partner garage about the cars it is repairing for KPI claims, one by one,
+# and ask it to file the claim for payment once a car is done. Wording: KPI script
+# "สคริปโทรติดตามอู่วางบิล" (29 Oct 2026, kpi_source); lines marked poc_approved join it into a call.
+id: garage_followup
+title: โทรติดตามอู่วางบิล
+version: "2026-10-29.1"
+persona_name: น้องเคพีไอ
+service_phone: "02-624-1111"
+party: garage
+recording_notice: false
+limits:
+  max_clarifications: 2
+  max_silences: 3
+  max_faq_questions: 2
+acknowledgements: ["ค่ะ", "รับทราบค่ะ", "ได้ค่ะ"]
+
+wording:
+  greet:
+    status: poc_approved
+    segments: ["สวัสดีค่ะ ดิฉันน้องเคพีไอ ผู้ช่วย AI จากบริษัท กรุงไทยพานิชประกันภัยค่ะ ไม่ทราบว่าใช่อู่{garage_name}ไหมคะ"]
+  identity_recheck:
+    status: poc_approved
+    segments: ["ขอโทษนะคะ ไม่ทราบว่าที่นี่ใช่อู่{garage_name}ไหมคะ"]
+  intro:
+    status: kpi_source
+    segments: ["ขอสอบถามข้อมูลรถจำนวน {vehicle_count} คันค่ะ"]
+  availability_short:
+    status: poc_approved
+    segments: ["ไม่ทราบว่าตอนนี้สะดวกตรวจสอบให้สักครู่ไหมคะ"]
+  notice:
+    status: poc_approved
+    segments: ["การสนทนานี้จะถูกบันทึกเสียงเพื่อการประสานงานค่ะ"]
+  second_factor_ask:
+    status: poc_approved
+    segments: ["ขอโทษนะคะ ไม่ทราบว่าที่นี่ใช่อู่{garage_name}ไหมคะ"]
+  second_factor_retry:
+    status: poc_approved
+    segments: ["ขอโทษนะคะ ไม่ทราบว่าที่นี่ใช่อู่{garage_name}ไหมคะ"]
+  closing:
+    status: poc_approved
+    segments: ["ขอบคุณมากค่ะ สวัสดีค่ะ"]
+  wrong_person_close:
+    status: poc_approved
+    segments: ["ขออภัยที่รบกวนค่ะ ดิฉันน่าจะโทรผิดเบอร์ ขอบคุณค่ะ สวัสดีค่ะ"]
+  still_there:
+    status: poc_approved
+    segments: ["ขอโทษนะคะ ไม่ทราบว่ายังอยู่ในสายไหมคะ"]
+    alternatives: ["สวัสดีค่ะ ไม่ทราบว่ายังอยู่ในสายไหมคะ"]
+  still_there_line:
+    status: poc_approved
+    segments: ["สวัสดีค่ะ ได้ยินเสียงดิฉันชัดไหมคะ หากสัญญาณไม่ชัด รบกวนพูดอีกครั้งได้เลยนะคะ"]
+  say_again:
+    status: poc_approved
+    segments: ["ขอโทษค่ะ เมื่อสักครู่เสียงไม่ค่อยชัด รบกวนพูดอีกครั้งได้ไหมคะ"]
+  off_topic:
+    status: poc_approved
+    segments: ["ขออภัยนะคะ เรื่องนี้อยู่นอกเหนือที่ดิฉันดูแลค่ะ วันนี้ดิฉันโทรมาสอบถามเรื่องรถที่ซ่อมอยู่นะคะ"]
+  # ---- each car (KPI script) ----
+  car_ask:
+    status: kpi_source
+    segments: ["รบกวนตรวจสอบรถทะเบียน {plate} ให้หน่อยนะคะ ว่าขณะนี้ซ่อมเสร็จเรียบร้อยแล้วหรือยังคะ"]
+  car_repaired:
+    status: kpi_source
+    segments: ["ขอบคุณค่ะ หากซ่อมเสร็จเรียบร้อยแล้ว รบกวนดำเนินการตั้งเบิกเคลมในระบบให้ด้วยนะคะ"]
+  car_ask_completion:
+    status: kpi_source
+    segments: ["ไม่ทราบว่าคาดว่าจะซ่อมแล้วเสร็จประมาณวันที่เท่าไรคะ"]
+  car_completion_ack:
+    status: kpi_source
+    segments: ["รับทราบค่ะ หากซ่อมเสร็จเรียบร้อยแล้ว รบกวนดำเนินการตั้งเบิกเคลมในระบบให้ด้วยนะคะ"]
+  car_ask_contacted:
+    status: kpi_source
+    segments: ["ไม่ทราบว่าทางอู่ได้โทรติดตามลูกค้าเพื่อนัดหมายเข้าซ่อมแล้วหรือยังคะ"]
+  car_ask_dates:
+    status: kpi_source
+    segments: ["ขอบคุณค่ะ รบกวนแจ้งวันนัดหมายเข้าซ่อม และกำหนดวันส่งมอบรถ หรือวันรับรถโดยประมาณให้ทราบด้วยนะคะ"]
+  car_dates_ack:
+    status: kpi_source
+    segments: ["รับทราบค่ะ หากงานซ่อมเสร็จเรียบร้อยแล้ว รบกวนดำเนินการตั้งเบิกเคลมในระบบให้ด้วยนะคะ"]
+  car_unreachable:
+    status: kpi_source
+    segments: ["รับทราบค่ะ กรณีดังกล่าวทางบริษัทจะติดต่อประสานลูกค้าโดยตรง หากสามารถติดต่อลูกค้าได้ จะแจ้งวันนัดหมายเข้าซ่อมกลับให้อู่อีกครั้งนะคะ"]

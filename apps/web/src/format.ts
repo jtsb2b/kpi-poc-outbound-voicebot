@@ -3,6 +3,8 @@ import type { Call } from "./api";
 export const CAMPAIGN_LABEL: Record<string, string> = {
   pa_confirmation: "ยืนยันกรมธรรม์ PA",
   accident_survey: "สำรวจความพึงพอใจ",
+  garage_followup: "ติดตามอู่วางบิล",
+  repair_appointment: "นัดเข้าซ่อมกับลูกค้า",
 };
 
 export const LIFECYCLE_STEPS = ["queued", "dispatching", "dialing", "ringing", "in_conversation", "ended"] as const;
@@ -24,6 +26,8 @@ export const OUTCOME_LABEL: Record<string, string> = {
   policy_partial: "ทวนข้อมูลไม่ครบ",
   survey_completed: "ทำแบบสอบถามครบ",
   survey_partial: "แบบสอบถามไม่ครบ",
+  followup_completed: "ติดตามครบ",
+  followup_partial: "ติดตามไม่ครบ",
   callback_requested: "ขอให้ติดต่อกลับ",
   wrong_person: "ผิดคน",
   verification_failed: "ยืนยันตัวตนไม่สำเร็จ",
@@ -41,7 +45,7 @@ export type Tone = "good" | "warn" | "bad" | "neutral";
 
 export function outcomeTone(outcome: string | null): Tone {
   if (!outcome) return "neutral";
-  if (["policy_confirmed", "survey_completed"].includes(outcome)) return "good";
+  if (["policy_confirmed", "survey_completed", "followup_completed"].includes(outcome)) return "good";
   if (["technical_failure", "verification_failed", "wrong_person", "do_not_call", "notice_objection"].includes(outcome))
     return "bad";
   if (outcome === "canceled") return "neutral";
@@ -78,6 +82,20 @@ export const TASK_LABEL: Record<string, string> = {
   safety: "ความปลอดภัย/ผู้บาดเจ็บ",
   urgent: "เร่งด่วน",
   unclear_answer: "คำตอบไม่ชัดเจน",
+  customer_contact: "บริษัทติดต่อลูกค้าเอง",
+  garage_notify: "แจ้งอู่ยืนยันนัด",
+};
+
+export const REPAIR_STATUS_LABEL: Record<string, string> = {
+  not_asked: "ยังไม่ได้ถาม",
+  repaired: "ซ่อมเสร็จแล้ว",
+  in_repair: "อยู่ระหว่างซ่อม",
+  awaiting_customer: "รอลูกค้านำรถเข้า",
+  booked: "นัดเข้าซ่อมแล้ว",
+  customer_unreachable: "อู่ติดต่อลูกค้าไม่ได้",
+  not_at_garage: "ไม่มีรถที่อู่",
+  date_given: "ลูกค้าแจ้งวันเข้าซ่อม",
+  not_ready: "ลูกค้ายังไม่สะดวก",
 };
 
 export const IDENTITY_LABEL: Record<string, string> = {
@@ -151,7 +169,16 @@ const CASE_LABEL: Record<string, string> = {
   case_id: "เลขเคส",
   accident_date: "วันที่เกิดเหตุ",
   surveyor_attended: "พนักงานสำรวจภัย",
+  garage_name: "อู่",
+  vehicles: "รถที่ติดตาม",
+  vehicle: "รถ",
 };
+
+type CaseVehicle = { plate?: string; car?: string; customer_name?: string; claim_no?: string };
+
+function vehicleLine(v: CaseVehicle): string {
+  return [v.plate, v.car, v.customer_name && `คุณ${v.customer_name}`, v.claim_no].filter(Boolean).join(" · ");
+}
 
 export function caseSummary(c: Record<string, unknown>): [string, string][] {
   return Object.entries(CASE_LABEL)
@@ -159,6 +186,9 @@ export function caseSummary(c: Record<string, unknown>): [string, string][] {
     .map(([key, name]) => {
       const v = c[key];
       if (key === "surveyor_attended") return [name, v === true ? "มีไปที่เกิดเหตุ" : v === false ? "ไม่มี" : "ไม่ทราบ"];
+      if (key === "garage_name") return [name, `อู่${String(v)}`];
+      if (key === "vehicles" && Array.isArray(v)) return [`${name} (${v.length} คัน)`, v.map(vehicleLine).join("\n")];
+      if (key === "vehicle" && v && typeof v === "object") return [name, vehicleLine(v as CaseVehicle)];
       if (key === "premium_thb" && typeof v === "number" && c.billing_period) {
         return [name, `${v.toLocaleString("th-TH")} บาทต่อ${String(c.billing_period)}`];
       }
@@ -199,7 +229,15 @@ export function scriptProgress(call: Call): ProgressStep[] {
     { label: "ยืนยันตัวตน", done: r?.identity_result === "confirmed" },
     { label: "แจ้งการบันทึก", done: Boolean(r?.notice_delivered) },
   ];
-  if (call.campaign === "pa_confirmation") {
+  if (call.campaign === "garage_followup" || call.campaign === "repair_appointment") {
+    if (call.campaign === "garage_followup") raw.splice(1, 1); // the garage script has no recording notice
+    (r?.vehicles ?? []).forEach((v, i) => {
+      raw.push({
+        label: call.campaign === "garage_followup" ? `คันที่ ${i + 1}` : "วันเข้าซ่อม",
+        done: v.status !== "not_asked" && v.status !== "awaiting_customer",
+      });
+    });
+  } else if (call.campaign === "pa_confirmation") {
     const fields = r?.policy_fields ?? [];
     const reviewed = fields.filter((f) => f.status !== "not_reviewed").length;
     raw.push({

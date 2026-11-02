@@ -1,7 +1,26 @@
 import type { Call } from "../api";
-import { ANSWER_STATUS_LABEL, DELIVERY_LABEL, FIELD_STATUS_LABEL, IDENTITY_LABEL, TASK_LABEL, label } from "../format";
+import {
+  ANSWER_STATUS_LABEL,
+  DELIVERY_LABEL,
+  FIELD_STATUS_LABEL,
+  IDENTITY_LABEL,
+  REPAIR_STATUS_LABEL,
+  TASK_LABEL,
+  label,
+} from "../format";
 
 const FIELD_TONE: Record<string, string> = { confirmed: "good", disputed: "bad", unclear: "warn", not_reviewed: "neutral" };
+const REPAIR_TONE: Record<string, string> = {
+  repaired: "good",
+  booked: "good",
+  date_given: "good",
+  in_repair: "warn",
+  awaiting_customer: "warn",
+  not_ready: "warn",
+  customer_unreachable: "bad",
+  not_at_garage: "bad",
+  not_asked: "neutral",
+};
 const DELIVERY_TONE: Record<string, string> = { full: "good", resumed_after_interruption: "good", not_delivered: "neutral" };
 const ANSWER_TONE: Record<string, string> = {
   answered: "good",
@@ -93,6 +112,28 @@ export function ResultView({ call, detailed = false }: { call: Call; detailed?: 
                   ) : (
                     <span className={`pill ${ANSWER_TONE[a.status] ?? "neutral"}`}>{label(ANSWER_STATUS_LABEL, a.status)}</span>
                   )}
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {(r.vehicles ?? []).length > 0 && (
+        <>
+          <h3 className="subhead">สถานะรถ</h3>
+          <div className="kv">
+            {(r.vehicles ?? []).map((v) => (
+              <div className="kv-row" key={v.plate}>
+                <span className="kv-label">
+                  <strong>{v.plate}</strong> {v.label}
+                  {v.completion_text && <small>คาดว่าซ่อมเสร็จ: {v.completion_text}</small>}
+                  {v.appointment_text && <small>วันนัด/วันที่สะดวกเข้าซ่อม: {v.appointment_text}</small>}
+                  {v.pickup_text && <small>วันรับรถ: {v.pickup_text}</small>}
+                  {detailed && v.statement && <p className="quote">“{v.statement}”</p>}
+                </span>
+                <span className="kv-value">
+                  <span className={`pill ${REPAIR_TONE[v.status] ?? "neutral"}`}>{label(REPAIR_STATUS_LABEL, v.status)}</span>
                 </span>
               </div>
             ))}

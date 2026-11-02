@@ -1,0 +1,60 @@
+# Claims follow-up 2: call a customer the partner garage could not reach, and ask when they can bring
+# the car in for repair. Wording: KPI script "สคริปโทรหาลูกค้า" (29 Oct 2026, kpi_source); the AI
+# introduction and the recording notice follow the other customer campaigns (PM, 19 Oct 2026).
+id: repair_appointment
+title: ประสานนัดหมายเข้าซ่อมกับลูกค้า
+version: "2026-10-29.1"
+persona_name: น้องเคพีไอ
+service_phone: "02-624-1111"
+limits:
+  max_clarifications: 2
+  max_silences: 3
+  max_faq_questions: 2
+acknowledgements: ["ค่ะ", "รับทราบค่ะ", "ได้ค่ะ"]
+
+wording:
+  greet:
+    status: kpi_source
+    segments: ["สวัสดีค่ะ ติดต่อจากบริษัทกรุงไทยพานิชประกันภัยนะคะ ขอเรียนสายคุณ{customer_name} เกี่ยวกับรถทะเบียน {plate} ค่ะ"]
+  identity_recheck:
+    status: poc_approved
+    segments: ["ไม่ทราบว่ากำลังเรียนสายกับคุณ{customer_name}อยู่ใช่ไหมคะ"]
+  intro:
+    status: poc_approved
+    segments:
+      - "ดิฉันน้องเคพีไอ ผู้ช่วย AI จากบริษัท กรุงไทยพานิชประกันภัยค่ะ"
+      - "โทรมาเพื่อประสานนัดหมายนำรถเข้าซ่อม ใช้เวลาไม่นานค่ะ"
+      - "ไม่ทราบว่าตอนนี้สะดวกคุยไหมคะ"
+  availability_short:
+    status: poc_approved
+    segments: ["ไม่ทราบว่าตอนนี้สะดวกคุยสักครู่ไหมคะ"]
+  notice:
+    verbatim: true
+    status: poc_approved
+    segments:
+      - "ขอบพระคุณค่ะ ขออนุญาตแจ้งให้ทราบว่า การสนทนานี้จะถูกบันทึกเสียง เพื่อรักษาผลประโยชน์ของคุณลูกค้า และใช้ปรับปรุงคุณภาพการให้บริการนะคะ"
+  second_factor_ask:
+    status: pending_kpi_approval
+    segments: ["ก่อนเริ่ม ขออนุญาตยืนยันตัวตนนะคะ รบกวนแจ้งวันและเดือนเกิดของคุณลูกค้าค่ะ"]
+  second_factor_retry:
+    status: pending_kpi_approval
+    segments: ["ขออภัยค่ะ ข้อมูลยังไม่ตรง รบกวนแจ้งวันและเดือนเกิดอีกครั้งนะคะ"]
+  closing:
+    status: kpi_source
+    segments: ["ขอบคุณค่ะ สวัสดีค่ะ"]
+  off_topic:
+    status: poc_approved
+    segments: ["ขออภัยนะคะ เรื่องนี้อยู่นอกเหนือที่ดิฉันดูแลค่ะ วันนี้ดิฉันโทรมาประสานนัดหมายเข้าซ่อมรถนะคะ"]
+  # ---- the appointment (KPI script) ----
+  car_reason:
+    status: kpi_source
+    segments: ["เนื่องจากอู่คู่สัญญาแจ้งว่ายังไม่สามารถติดต่อลูกค้าเพื่อนัดหมายเข้าซ่อมรถได้ ทางบริษัทจึงขอประสานงานเพิ่มเติมค่ะ"]
+  car_ask:
+    status: kpi_source
+    segments: ["ไม่ทราบว่าลูกค้าสะดวกนำรถเข้าซ่อมในช่วงวันไหนคะ ทางบริษัทจะได้แจ้งอู่เพื่อดำเนินการนัดหมายให้ค่ะ"]
+  car_date_ack:
+    status: kpi_source
+    segments: ["รับทราบค่ะ ทางบริษัทจะประสานแจ้งอู่ให้ติดต่อกลับเพื่อยืนยันวันและเวลานัดหมายอีกครั้งนะคะ ขอบคุณค่ะ"]
+  car_not_ready:
+    status: kpi_source
+    segments: ["รับทราบค่ะ ไม่ทราบว่าพอจะสะดวกในช่วงประมาณเดือนไหน หรือเมื่อพร้อมเข้าซ่อมแล้ว รบกวนแจ้งกลับทางบริษัทหรืออู่คู่สัญญาได้เลยนะคะ"]

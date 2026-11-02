@@ -72,3 +72,57 @@ profiles:
       case_id: "CLM-MOCK-2026-0003"
       accident_date: 2026-10-03
       surveyor_attended: null
+  # Claims follow-up (KPI script of 29 Oct 2026; KPI agreed the data may be mocked). Fictional garages,
+  # plates, customers and claim numbers.
+  - profile_id: garage-three-cars
+    campaign: garage_followup
+    label: "อู่ ช.ทวีการช่าง · รถ 3 คัน"
+    case:
+      record_id: MOCK-GR-001
+      garage_name: "ช.ทวีการช่าง"
+      vehicles:
+        - plate: "1กข 1234 กรุงเทพมหานคร"
+          car: "โตโยต้า ยาริส สีขาว"
+          customer_name: "สมชาย ใจดี"
+          claim_no: "CL-6910-00123"
+        - plate: "2ขค 5678 นนทบุรี"
+          car: "ฮอนด้า ซิตี้ สีเทา"
+          customer_name: "วิภา รักษ์ดี"
+          claim_no: "CL-6910-00187"
+        - plate: "3ฒพ 9012 ปทุมธานี"
+          car: "อีซูซุ ดีแมคซ์ สีดำ"
+          customer_name: "ประยุทธ มั่นคง"
+          claim_no: "CL-6910-00215"
+  - profile_id: garage-one-car
+    campaign: garage_followup
+    label: "อู่ ส.เจริญยนต์ · รถ 1 คัน"
+    case:
+      record_id: MOCK-GR-002
+      garage_name: "ส.เจริญยนต์"
+      vehicles:
+        - plate: "4กง 3456 สมุทรปราการ"
+          car: "มาสด้า ทู สีแดง"
+          customer_name: "นภา ศรีสุข"
+          claim_no: "CL-6910-00242"
+  - profile_id: repair-honda-city
+    campaign: repair_appointment
+    label: "ลูกค้าที่อู่ติดต่อไม่ได้ · ฮอนด้า ซิตี้ · อู่ ช.ทวีการช่าง"
+    case:
+      record_id: MOCK-RA-001
+      garage_name: "ช.ทวีการช่าง"
+      vehicle:
+        plate: "2ขค 5678 นนทบุรี"
+        car: "ฮอนด้า ซิตี้ สีเทา"
+        customer_name: "วิภา รักษ์ดี"
+        claim_no: "CL-6910-00187"
+  - profile_id: repair-yaris
+    campaign: repair_appointment
+    label: "ลูกค้าที่อู่ติดต่อไม่ได้ · โตโยต้า ยาริส · อู่ ส.เจริญยนต์"
+    case:
+      record_id: MOCK-RA-002
+      garage_name: "ส.เจริญยนต์"
+      vehicle:
+        plate: "5ฆฉ 7890 กรุงเทพมหานคร"
+        car: "โตโยต้า ยาริส สีเงิน"
+        customer_name: "สมชาย ใจดี"
+        claim_no: "CL-6910-00256"

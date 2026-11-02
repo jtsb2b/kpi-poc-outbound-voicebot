@@ -40,6 +40,17 @@ export const ShieldCheckIcon = (p: P) => (
     <path d="m9 12 2 2 4-4" />
   </Icon>
 );
+export const WrenchIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.5 2.5-2.4-.6-.6-2.4z" />
+  </Icon>
+);
+export const CalendarIcon = (p: P) => (
+  <Icon {...p}>
+    <rect x="3" y="5" width="18" height="16" rx="2" />
+    <path d="M16 3v4M8 3v4M3 10h18" />
+  </Icon>
+);
 export const StarIcon = (p: P) => (
   <Icon {...p}>
     <path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z" />

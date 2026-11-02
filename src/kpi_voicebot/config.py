@@ -49,19 +49,23 @@ class Settings(BaseSettings):
     # Longest a turn may queue for that budget before it is said with the approved wording instead.
     llm_max_queue_seconds: float = Field(default=0.3, ge=0)
 
-    # Speech recognition, chosen explicitly (never a silent fallback): Soniox real-time while JaiASR
-    # is in maintenance and fine-tuning (decided by the user's senior, 15 Oct 2026), or JaiASR.
+    # Speech recognition, chosen explicitly (never a silent fallback): Soniox real-time (the default
+    # since JaiASR went into maintenance on 15 Oct 2026) or the fine-tuned JaiASR (back 28 Oct 2026).
     asr_provider: Literal["soniox", "jai"] = "soniox"
     soniox_api_key: SecretStr | None = None
     soniox_model: str = "stt-rt-v5"
     # How long after speech stops Soniox may wait before ending the utterance (500-3000 ms).
     soniox_max_endpoint_delay_ms: int = Field(default=800, ge=500, le=3000)
-    # JaiASR-Flash-v1.0 (JTS), streaming over WebSocket
+    # JaiASR (JTS, Qwen3-ASR fine-tuned for Thai, 28 Oct 2026), streaming over WebSocket
     jaiasr_api_key: SecretStr | None = None
-    jaiasr_model: str = "session-tenant-ai-engineer-jaiasr-flash-v1"
-    jaiasr_stream_url: str = "wss://api.jasgpu.com/v1/audio/transcriptions/stream"
-    jaiasr_http_url: str = "https://api.jasgpu.com/v1/audio/transcriptions"
-    asr_chunk_seconds: float = Field(default=0.5, ge=0.25, le=10)
+    jaiasr_model: str = "qwen3-asr-th-ft"
+    jaiasr_stream_url: str = "wss://jaiasr.bai-ap.jts.co.th:10206/v1/audio/transcriptions/stream"
+    jaiasr_http_url: str = "https://jaiasr.bai-ap.jts.co.th:10206/v1/audio/transcriptions"
+    asr_chunk_seconds: float = Field(default=1.0, ge=0.25, le=10)
+    # Recent chunks and tokens the server may still revise in a partial.
+    jaiasr_unfixed_chunk_num: int = Field(default=5, ge=0)
+    jaiasr_unfixed_token_num: int = Field(default=5, ge=0)
+    jaiasr_ready_timeout_seconds: float = Field(default=30.0, gt=0)
 
     # Voice, chosen explicitly (never a fallback): Gemini 3.8 Flash-Lite TTS (the PM's choice, 19 Oct 2026) or JAI TTS
     tts_provider: Literal["jai", "gemini"] = "gemini"
