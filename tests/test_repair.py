@@ -165,7 +165,7 @@ async def test_an_english_name_is_said_the_thai_way() -> None:
 
 
 async def test_the_scale_explanation_does_not_move_a_score_to_another_question() -> None:
-    a, _ = agent("survey-surveyor", [NEXT])
+    a, _ = agent("survey-surveyor", [NEXT, NEXT])
     a.start()
     a.check.identity, a.check.ai_disclosed, a.check.available = "confirmed", True, True
     a.check.notice, a.check.consent = True, "granted"

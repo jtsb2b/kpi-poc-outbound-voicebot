@@ -438,6 +438,9 @@ def parse_score(text: str) -> ScoreParse:
     for phrase in _NUMBER_FALSE_FRIENDS:
         t = t.replace(phrase, " ")
 
+    if "คะแนนเดียว" in t:  # "ให้คะแนนเดียวค่ะ เพราะว่า…" is 1 (3 Nov B2B call: read as the 0 in the reason)
+        return ScoreParse(1, hedged=hedged, question_ref=question_ref)
+
     out_of = _OUT_OF.search(t)
     if out_of:
         return ScoreParse(_number_value(out_of.group(1)), hedged=hedged, question_ref=question_ref)
@@ -453,6 +456,8 @@ def parse_score(text: str) -> ScoreParse:
         change = list(_CHANGE_TO.finditer(t))
         if change:
             return ScoreParse(_number_value(change[-1].group(1)), hedged=hedged, question_ref=question_ref)
+        if contains_any(t, _CORRECTION):
+            return ScoreParse(tokens[-1], hedged=hedged, question_ref=question_ref)  # "4 ครับ เอ้ย เอา 1"
 
     unique = tuple(dict.fromkeys(tokens))
     if len(unique) == 1:

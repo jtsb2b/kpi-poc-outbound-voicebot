@@ -772,7 +772,10 @@ async def test_one_score_is_never_given_to_two_questions() -> None:
     # 21 Oct suite: the rules took "ให้ 5" for q1, the model took it for q2 as well and skipped to q3.
     a, _ = agent(
         "survey-surveyor",
-        ["SAY: ได้ค่ะ 5 คะแนนนะคะ ส่วนความรวดเร็วของพนักงานสำรวจภัย ให้กี่คะแนนดีคะ\nUPDATE: q2 answered 5\nEND: none"],
+        [
+            "SAY: ได้ค่ะ 5 คะแนนนะคะ ส่วนความรวดเร็วของพนักงานสำรวจภัย ให้กี่คะแนนดีคะ\nUPDATE: q2 answered 5\nEND: none",
+            "SAY: ได้ค่ะ 5 คะแนนนะคะ แล้วความพึงพอใจโดยรวมต่อศูนย์รับแจ้งอุบัติเหตุ ให้กี่คะแนนดีคะ\nEND: none",
+        ],
     )
     a.start()
     ready(a)
@@ -808,6 +811,7 @@ def _survey_at_comments():  # type: ignore[no-untyped-def]
     c.identity, c.ai_disclosed, c.available, c.notice, c.consent = "confirmed", True, True, True, "granted"
     for item in a.items:
         c.status[item.id] = "3"
+    a.last_reply = ["เพื่อพัฒนาบริการให้ดียิ่งขึ้น ไม่ทราบว่าคุณลูกค้ามีข้อเสนอแนะ หรือคำติชมเพิ่มเติมไหมคะ"]
     return a, model
 
 
@@ -818,3 +822,72 @@ async def test_the_closing_comments_are_heard_out_before_the_goodbye() -> None:
     assert a.result.final_comment_raw == "ผมรู้สึกว่าเจ้าหน้าที่ให้บริการช้ามาก แล้วก็ ข้อมูลไม่ค่อยตรง"
     directive = await a.reply("ไม่มีแล้วครับ")
     assert directive.end_call and a.result.final_comment_raw.startswith("ผมรู้สึก")
+
+
+Q2 = "แล้วความพึงพอใจโดยรวมต่อการให้บริการของศูนย์รับแจ้งอุบัติเหตุ ให้กี่คะแนนดีคะ จาก 1 ถึง 5 ค่ะ"
+
+
+def _survey_at_q2(replies: list[str]):  # type: ignore[no-untyped-def]
+    a, model = agent("survey-surveyor", replies)
+    a.start()
+    ready(a)
+    a.check.status["q1"] = "4"
+    a.history.append(("bot", Q2))
+    a.last_reply = [Q2]
+    return a, model
+
+
+async def test_a_score_below_three_gets_its_why_before_the_next_question() -> None:
+    # 3 Nov B2B calls: "2 แล้วกันค่ะ" and "ไม่ ให้ 1 แล้วกัน" got "ได้ค่ะ … คะแนนนะคะ" and the next question.
+    on = "SAY: ได้ค่ะ 2 คะแนนนะคะ ส่วนความรวดเร็วของพนักงานสำรวจภัย ให้กี่คะแนนดีคะ\nUPDATE: q2 answered 2\nEND: none"
+    why = "SAY: ต้องขออภัยในความไม่สะดวกนะคะ มีส่วนไหนที่อยากให้ศูนย์รับแจ้งอุบัติเหตุปรับปรุงไหมคะ\nUPDATE: q2 answered 2\nEND: none"
+    a, model = _survey_at_q2([on, why])
+    text = await say(a, "2 แล้วกันค่ะ")
+    assert len(model.seen) == 2 and "ปรับปรุง" in text and a.check.feedback_pending == "q2"
+    a, _ = _survey_at_q2([on, on])
+    text = await say(a, "ไม่ ให้ 2 แล้วกัน")  # the model never asks: the approved why is said instead
+    assert "ปรับปรุง" in text and "พนักงานสำรวจ" not in text
+
+
+async def test_a_three_is_no_longer_asked_why_and_a_reason_given_is_kept() -> None:
+    nxt = "SAY: ได้ค่ะ ส่วนความรวดเร็วของพนักงานสำรวจภัย ให้กี่คะแนนดีคะ\nUPDATE: q2 answered {}\nEND: none"
+    a, _ = _survey_at_q2([nxt.format(3)])
+    await say(a, "ให้ เอ่อ ก็ดี ให้ 3")
+    assert a.check.feedback_pending is None
+    a, _ = _survey_at_q2([nxt.format(1)])
+    await say(a, "ให้ 1 เพราะโทรไปแล้วรอสายนานมาก")
+    q2 = next(x for x in a.result.survey_answers if x.question == "q2")
+    assert q2.feedback_raw and a.check.feedback_pending is None
+
+
+async def test_two_scores_at_once_are_asked_back_and_never_chosen() -> None:
+    pick = "SAY: ขออนุญาตบันทึกเป็น 3 คะแนนนะคะ ส่วนความรวดเร็วของพนักงานสำรวจภัย ให้กี่คะแนนดีคะ\nUPDATE: q2 answered 3\nEND: none"
+    ask = "SAY: ขอโทษนะคะ ไม่ทราบว่าข้อนี้ให้ 2 หรือ 3 คะแนนดีคะ\nEND: none"
+    a, model = _survey_at_q2([pick, ask])
+    await say(a, "2 หรือ 3 ก็ได้")
+    assert len(model.seen) == 2 and a.check.status["q2"] == "pending"
+
+
+async def test_a_changed_score_never_lands_on_a_question_not_yet_asked() -> None:
+    wrong = (
+        "SAY: รับทราบ 4 คะแนนค่ะ ส่วนความพึงพอใจโดยรวมต่อการให้บริการสำรวจอุบัติเหตุ ให้กี่คะแนนดีคะ\nUPDATE: q3 answered 4\nEND: none"
+    )
+    right = "SAY: ได้ค่ะ เปลี่ยนเป็น 4 คะแนนนะคะ ส่วนความรวดเร็วของพนักงานสำรวจภัย ให้กี่คะแนนดีคะ\nUPDATE: q2 answered 4\nEND: none"
+    a, model = _survey_at_q2([wrong, right])
+    await say(a, "ให้เป็น 4 คนละเรื่อง")
+    assert len(model.seen) == 2 and a.check.status["q3"] == "pending" and a.check.status["q2"] == "4"
+
+
+def test_one_point_and_a_corrected_score_are_read_right() -> None:
+    from kpi_voicebot.thai_parse import parse_score
+
+    assert parse_score("ให้คะแนนเดียวค่ะ เพราะว่ารู้สึกว่า 0").value == 1
+    assert parse_score("4 ครับ เอ้ย เอา เอาทั้ง 1 พอ").value == 1
+
+
+async def test_a_short_no_ends_the_closing_comments() -> None:
+    a, _ = _survey_at_comments()
+    a.check.comment_rounds = 1
+    a.last_reply = ["ขอบพระคุณสำหรับความคิดเห็นนะคะ ไม่ทราบว่ามีเรื่องอื่นเพิ่มเติมอีกไหมคะ"]
+    await a.reply("ไม่นะครับ")
+    assert not a.check.comment_open
