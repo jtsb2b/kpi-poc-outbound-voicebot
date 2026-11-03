@@ -174,3 +174,40 @@ async def test_the_scale_explanation_does_not_move_a_score_to_another_question()
     ]
     await a.reply("5 คะแนนครับ")
     assert a.check.status["q1"] == "5" and a.check.status["q2"] == "pending"
+
+
+def _appointment_ready(replies: list[str]):  # type: ignore[no-untyped-def]
+    a, model = agent("repair-yaris", replies)
+    a.start()
+    a.check.identity, a.check.ai_disclosed, a.check.available, a.check.notice = "confirmed", True, True, True
+    return a, model
+
+
+async def test_a_dropped_syllable_still_agrees_to_the_recording() -> None:
+    a, _ = _appointment_ready([NEXT])
+    a.last_reply = ["ไม่ทราบว่าคุณลูกค้ายินยอมให้บันทึกเสียงการสนทนาไหมคะ"]
+    await a.reply("ยอมครับ")  # 3 Nov call: "ยินยอมครับ" heard as "ยอมครับ"
+    assert a.check.consent == "granted"
+
+
+async def test_a_no_to_another_question_never_declines_the_recording() -> None:
+    reply = "SAY: รับทราบค่ะ ขอบพระคุณค่ะ สวัสดีค่ะ\nUPDATE: recording declined\nEND: none"
+    a, _ = _appointment_ready([reply])
+    a.last_reply = ["ไม่ทราบว่ามีข้อมูลอื่นๆ ให้ดิฉันช่วยดูแลเพิ่มเติมอีกไหมคะ"]
+    directive = await a.reply("ไม่มีล่ะครับ")  # 3 Nov call: the audio was deleted here
+    assert a.check.consent == "pending" and "ไม่บันทึกเสียง" not in directive.text
+
+
+async def test_a_call_back_time_is_never_the_repair_date() -> None:
+    wrong = "SAY: รับทราบค่ะ จะให้เจ้าหน้าที่ติดต่อกลับวันที่ 25 นะคะ\nUPDATE: car1 date_given | 25 พฤศจิกายน 17:00-18:00\nEND: none"
+    a, _ = _appointment_ready([NEXT, wrong])
+    a.check.consent = "granted"
+    a.last_reply = ["ไม่ทราบว่าลูกค้าสะดวกนำรถเข้าซ่อมในช่วงวันไหนคะ"]
+    await a.reply("สะดวกเป็นช่วงต้นเดือนธันวาครับ")
+    row = a.result.vehicles[0]
+    assert row.status == "not_ready" and "ธันวา" in (row.appointment_text or "")
+    await a.reply("ให้โทรมาถามอีกทีวันที่ 25 พฤศจิกาได้ไหมครับ ช่วงห้าโมงเย็นถึงหก")
+    assert row.status == "not_ready" and "ธันวา" in (row.appointment_text or "")
+    assert a.result.callback.requested and "25" in (a.result.callback.preferred_time_text or "")
+    types = [t.type for t in a.result.tasks]
+    assert "callback" in types and "garage_notify" not in types and "question_follow_up" not in types

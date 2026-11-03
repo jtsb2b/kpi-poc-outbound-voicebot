@@ -455,6 +455,7 @@ async def test_words_said_while_the_reply_is_worked_out_are_answered_together() 
     )
     a.start()
     a.check.identity, a.check.ai_disclosed, a.check.available, a.check.notice = "confirmed", True, True, True
+    a.last_reply = ["ไม่ทราบว่าคุณลูกค้ายินยอมให้บันทึกเสียงการสนทนาไหมคะ"]
     dialogue = AgentDialogue(a)
     session = object.__new__(VoiceSession)
     session.dialogue, session.collector, session.sink = dialogue, TurnCollector(), None

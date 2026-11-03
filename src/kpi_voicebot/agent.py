@@ -353,12 +353,16 @@ def _consents(text: str) -> bool:
     s = read_signals(text)
     negative = s.negative and not re.search(r"ไม่มีปัญหา|ไม่เป็นไร", text)  # "ไม่มีปัญหา บันทึกได้" is a yes
     # "ยินยอมครับ ขี่มอเตอร์ไซค์คุ้มครองไหมครับ" is a yes, then a question (2 Nov suite: asked again 9 times).
-    leads = bool(re.match(r"\s*(ยินยอม|ได้ครับ|ได้ค่ะ|ตกลง|โอเค|บันทึกได้)", text))
+    leads = bool(re.match(r"\s*(ยินยอม|ยอม|ได้ครับ|ได้ค่ะ|ตกลง|โอเค|บันทึกได้)", text))
     if _declines_recording(text) or negative or (s.question and not leads):
         return False
-    return s.affirm or bool(re.search(r"(?<!ไม่)(ยินยอม|ยินดี|ตกลง|โอเค|ตามสบาย|เชิญ|บันทึกไป|อัดไป|(?<!ไม่)ได้)", text, re.I))
+    # "ยอมครับ": the recogniser often drops "ยิน" (3 Nov call: consent lost, the audio deleted).
+    return s.affirm or bool(
+        re.search(r"(?<!ไม่)(ยินยอม|ยอม|ยินดี|ตกลง|โอเค|ตามสบาย|เชิญ|บันทึกไป|อัดไป|(?<!ไม่)ได้)", text, re.I)
+    )
 
 
+_CALL_AGAIN = re.compile(r"โทร(มา|กลับ|หา|ใหม่)\S{0,12}(อีก|ใหม่|ถาม)|โทรกลับ|ติดต่อกลับ|โทรมาอีก")
 _NOTHING_MORE = re.compile(r"ไม่มี|พอแล้ว|แค่นี้|เท่านี้|หมดแล้ว|เรียบร้อย|ขอบคุณ")
 MAX_COMMENT_ROUNDS = 3
 
@@ -500,6 +504,7 @@ class CallAgent:
         self.repair = isinstance(base, RepairEngine)
         self.car_acks: list[str] = []  # approved lines owed this turn for cars the rules just settled
         self.rule_cars: set[int] = set()  # cars the rules settled from this turn's words
+        self.call_again = False  # this turn asks to be called back (repair campaigns)
         if not self.campaign.recording_notice:
             # KPI's garage script (29 Oct 2026) has no recording notice: the checklist starts past it and
             # the result records no consent either way. "ไม่ต้องบันทึก" still stops the recording.
@@ -642,6 +647,13 @@ class CallAgent:
         self.rule_scored = None
         self.car_acks = []
         self.rule_cars = set()
+        # "ให้โทรมาถามอีกทีวันที่ 25 พฤศจิกา" is when to call again, not when the car comes in (3 Nov call).
+        self.call_again = bool(self.repair) and bool(_CALL_AGAIN.search(customer))
+        if self.call_again:
+            self.result.callback.requested = True
+            self.result.callback.preferred_time_text = customer
+            if not any(t.type == "callback" for t in self.result.tasks):
+                self._task("callback", "ลูกค้าขอให้โทรกลับอีกครั้ง", customer)
         feedback_was_asked = self.check.feedback_asked
         c = self.check
         # Every score was in before this turn (the last one's "why" included): what the customer says now
@@ -782,7 +794,10 @@ class CallAgent:
             # "บอกแล้วว่าไม่ให้บันทึกเสียง": consent can be withdrawn at any time; the audio stops and is deleted.
             self._set_consent("declined")
         if c.notice and c.consent == "pending":
-            if declines or (s.negative and not s.question):
+            # A plain "ไม่" answers the recording question only when it was just asked: "ไม่มีล่ะครับ" to
+            # "anything else?" deleted the audio of a call the customer had agreed to record (3 Nov).
+            asked = _asks_consent(" ".join(self.last_reply))
+            if declines or (s.negative and not s.question and asked):
                 self._set_consent("declined")
             elif _consents(customer) and not s.hedged:
                 self._set_consent("granted")
@@ -868,6 +883,8 @@ class CallAgent:
             return  # "1กข 1234 กับ 2ขค 5678 เสร็จแล้ว ส่วน 3ฒพ 9012 ยังซ่อม" names other cars: the model reports each
         s = read_signals(customer)
         row = self.result.vehicles[item.index]
+        if self.call_again and self.campaign.party == "customer":
+            return  # the date said is when to call back
         dated, unsure = bool(WHEN.search(customer)), bool(UNSURE.search(customer))
         # "ยังไม่รู้ว่าจะเสร็จเมื่อไหร่" reads as a question but says the car is in repair; only a question with
         # nothing about the car ("ต้องจ่ายค่าเสียหายส่วนแรกไหม") settles nothing.
@@ -904,6 +921,12 @@ class CallAgent:
         row: VehicleResult = self.result.vehicles[item.index]
         if by_model and item.index in self.rule_cars and status in _CAR_STATUSES:
             return  # the customer's own words settled this car this turn; the model's status may not undo it
+        if (
+            self.call_again
+            and self.campaign.party == "customer"
+            and status in ("date_given", "not_ready", "appointment")
+        ):
+            return  # a call-back time never replaces the repair date the customer gave
         customer_call = {"date_given", "not_ready"}
         if status in _CAR_STATUSES and (status in customer_call) != (self.campaign.party == "customer"):
             return  # a garage's car is never "not ready", a customer never "booked" (2 Nov suite crash)
@@ -1605,7 +1628,8 @@ class CallAgent:
                 if _consents(customer):  # "ผมไม่อินกับพวกบันทึกเสียง" was taken as consent in the 19 Oct suite
                     self._set_consent("granted")
             elif name == "recording" and status == "declined":
-                self._set_consent("declined")
+                if _declines_recording(customer) or _asks_consent(" ".join(self.last_reply)):
+                    self._set_consent("declined")
             elif name == "questions" and status == "done":
                 c.questions_asked = True
             elif name == "final_comment" and status in ("done", "feedback", "answered"):
@@ -1645,10 +1669,12 @@ class CallAgent:
         if follow.get("type") == "question_follow_up" and answered_dates:
             follow = {}  # "ยกเลิกได้ถึงวันไหน" answered with the worked-out date: nothing for staff
         promised = re.search(r"เจ้าหน้าที่.{0,12}ติดต่อกลับ", " ".join(out.get("reply") or []))
-        noted = any(t.type == "question_follow_up" for t in self.result.tasks)
+        noted = any(t.type in ("question_follow_up", "callback") for t in self.result.tasks)
         if follow.get("type") in (None, "none") and promised and (heard.question or heard.has_question) and not noted:
             # "ขออนุญาตให้เจ้าหน้าที่ติดต่อกลับ" said without FOLLOW_UP (2 Nov suite): a promise needs a task.
             follow = {"type": "question_follow_up", "detail": customer}
+        if follow.get("type") == "callback" and any(t.type == "callback" for t in self.result.tasks):
+            follow = {}  # already noted with the customer's words
         if follow.get("type") not in (None, "none"):
             reason = {"question_follow_up": "คำถามที่ยังไม่มีคำตอบที่อนุมัติ"}.get(follow["type"], "ลูกค้าขอให้ติดต่อกลับ")
             self._task(follow["type"], reason, str(follow.get("detail") or customer))
