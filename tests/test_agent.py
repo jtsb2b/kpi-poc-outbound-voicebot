@@ -792,3 +792,29 @@ async def test_a_score_question_asked_twice_without_a_score_is_skipped() -> None
     await a.reply("ไม่มีครับ")
     q5 = next(x for x in a.result.survey_answers if x.question == "q5")
     assert q5.status == "skipped" and a.check.status["q5"] == "skipped"
+
+
+def _survey_at_comments():  # type: ignore[no-untyped-def]
+    a, model = agent(
+        "survey-surveyor",
+        [
+            "SAY: ขออภัยในความไม่สะดวกที่เกิดขึ้นนะคะ ดิฉันบันทึกไว้ให้เจ้าหน้าที่แล้วค่ะ ขอบพระคุณค่ะ สวัสดีค่ะ\nEND: completed",
+            "SAY: ขออภัยในความไม่สะดวกนะคะ ไม่ทราบว่ามีเรื่องอื่นเพิ่มเติมอีกไหมคะ\nUPDATE: final_comment done | ช้ามาก\nEND: none",
+            "SAY: ขอบพระคุณค่ะ สวัสดีค่ะ\nEND: completed",
+        ],
+    )
+    a.start()
+    c = a.check
+    c.identity, c.ai_disclosed, c.available, c.notice, c.consent = "confirmed", True, True, True, "granted"
+    for item in a.items:
+        c.status[item.id] = "3"
+    return a, model
+
+
+async def test_the_closing_comments_are_heard_out_before_the_goodbye() -> None:
+    a, _ = _survey_at_comments()
+    directive = await a.reply("ผมรู้สึกว่าเจ้าหน้าที่ให้บริการช้ามาก แล้วก็ ข้อมูลไม่ค่อยตรง")
+    assert not directive.end_call and directive.text.endswith("อีกไหมคะ")  # 3 Nov B2B: hung up mid-thought
+    assert a.result.final_comment_raw == "ผมรู้สึกว่าเจ้าหน้าที่ให้บริการช้ามาก แล้วก็ ข้อมูลไม่ค่อยตรง"
+    directive = await a.reply("ไม่มีแล้วครับ")
+    assert directive.end_call and a.result.final_comment_raw.startswith("ผมรู้สึก")

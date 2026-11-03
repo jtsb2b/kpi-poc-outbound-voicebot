@@ -11,6 +11,7 @@ numbers transcribe correctly. The file endpoint is kept for tests and benchmarks
 import asyncio
 import contextlib
 import json
+import re
 import ssl
 import time
 from collections.abc import AsyncIterator
@@ -148,17 +149,23 @@ async def transcribe_file(settings: Settings, path: Path, language: str = "Thai"
 
 # Awaiting states where the customer talks freely and may pause mid-thought.
 OPEN_ENDED = ("feedback:", "final_comment", "discrepancy_detail", "questions")
+# A turn that stops on "แล้วก็", "คือ", "เพราะ": the customer has more to say (3 Nov B2B test, cut off
+# after "ช้ามาก แล้วก็ ข้อมูลไม่ค่อยตรง").
+_UNFINISHED = re.compile(r"(แล้วก็|และ|ก็|คือ|แต่|เพราะ(ว่า)?|เช่น|อีก(อย่าง)?|เอ่อ+|อ่า+|อืม+)[\s.,…]*$")
 
 
 class TurnCollector:
     """Assembles what the customer says into turns, the way a listener would.
 
     A commit (0.5 s of silence) ends a short answer at once. For open-ended answers the
-    listener waits a little longer (`grace`) and joins the next commit if they carry on.
+    listener waits a little longer (`grace`, `comment_grace` for the closing comments) and joins the
+    next commit if they carry on. A turn that stops mid-sentence ("…แล้วก็") waits `hold` whatever was asked.
     """
 
-    def __init__(self, grace: float = 1.2) -> None:
+    def __init__(self, grace: float = 1.2, comment_grace: float = 1.8, hold: float = 2.5) -> None:
         self.grace = grace
+        self.comment_grace = comment_grace
+        self.hold = hold
         self.committed: list[str] = []
         self.partial = ""
         self.last_commit_at = 0.0
@@ -190,17 +197,21 @@ class TurnCollector:
         """The customer's next complete turn, or None when they stay silent. Speech already heard
         (a customer who cut in while the bot was talking) is part of this turn."""
         open_ended = bool(awaiting) and str(awaiting).startswith(OPEN_ENDED)
+        grace = 0.0
+        if open_ended:
+            grace = self.comment_grace if str(awaiting).startswith("final_comment") else self.grace
         started = time.monotonic()
         while True:
             self._changed.clear()
             now = time.monotonic()
             if self.committed and not self.partial.strip():
                 waited = now - self.last_commit_at
-                if not open_ended or waited >= self.grace:
+                wait = self.hold if _UNFINISHED.search(self.committed[-1]) else grace
+                if waited >= wait:
                     text = " ".join(self.committed)
                     self.reset()
                     return text
-                timeout = self.grace - waited
+                timeout = wait - waited
             elif not self.committed and not self.partial.strip() and now - started >= silence_timeout:
                 return None
             else:

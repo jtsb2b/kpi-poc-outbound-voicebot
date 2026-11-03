@@ -118,6 +118,8 @@ class Checklist:
     heard_values: set[str] = field(default_factory=set)  # policy groups whose values have all been heard
     feedback_pending: str | None = None  # survey question whose low score still needs a "why"
     feedback_asked: str | None = None  # the question whose "why" the bot has just asked
+    comment_open: bool = False  # the customer is giving closing comments: hear them out, never hang up
+    comment_rounds: int = 0  # times the bot asked "anything more?" after a comment
 
 
 SYSTEM_PROMPT = """คุณคือ "น้องเคพีไอ" AI ผู้ช่วยเสียงผู้หญิงของ บริษัท กรุงไทยพานิชประกันภัย จำกัด (มหาชน) กำลังโทรหา{callee}
@@ -355,6 +357,18 @@ def _consents(text: str) -> bool:
     if _declines_recording(text) or negative or (s.question and not leads):
         return False
     return s.affirm or bool(re.search(r"(?<!ไม่)(ยินยอม|ยินดี|ตกลง|โอเค|ตามสบาย|เชิญ|บันทึกไป|อัดไป|(?<!ไม่)ได้)", text, re.I))
+
+
+_NOTHING_MORE = re.compile(r"ไม่มี|พอแล้ว|แค่นี้|เท่านี้|หมดแล้ว|เรียบร้อย|ขอบคุณ")
+MAX_COMMENT_ROUNDS = 3
+
+
+def _more_to_say(text: str) -> bool:
+    """A closing comment with something in it, not "ไม่มีแล้วครับ ขอบคุณครับ"."""
+    flat = _flat(text)
+    if read_signals(text).no_comment or (_NOTHING_MORE.search(flat) and len(flat) <= 24):
+        return False
+    return len(flat) > 8
 
 
 _QUESTION_WORDS = re.compile(r"กี่|ไหม|มั้ย|อะไร|อย่างไร|ยังไง|เท่าไหร่|หรือเปล่า|ไหน|เมื่อไหร่")
@@ -620,6 +634,17 @@ class CallAgent:
         self.car_acks = []
         self.rule_cars = set()
         feedback_was_asked = self.check.feedback_asked
+        c = self.check
+        # Every score was in before this turn (the last one's "why" included): what the customer says now
+        # is a closing comment, never a score just answered.
+        closing_talk = isinstance(self.base, SurveyEngine) and c.notice and all(self._done(i) for i in self.items)
+        c.comment_open = (
+            closing_talk and c.comment_rounds < MAX_COMMENT_ROUNDS and _more_to_say(customer) and not signals.question
+        )
+        if c.comment_open and not c.feedback_pending:  # the reason for a low score is kept with that score
+            c.final_comment = True
+            raw = self.result.final_comment_raw
+            self.result.final_comment_raw = f"{raw} / {customer}" if raw else customer
         self._settle_by_rules(customer)
         first = str(self.vars.get("customer_first") or "")
         asked_who = bool(first) and first in " ".join(self.last_reply)
@@ -695,7 +720,8 @@ class CallAgent:
             self._apply({**out, "end_call": False, "follow_up": {}}, customer, settled_only=True)
             return self._fallback(customer)
         self._apply(out, customer)
-        c = self.check
+        if c.comment_open:
+            c.comment_rounds += 1
         if feedback_was_asked and c.feedback_pending == feedback_was_asked:
             # Asked once already: take what the customer said as the reason and move on, never ask twice.
             answer = next(a for a in self.result.survey_answers if a.question == feedback_was_asked)
@@ -1172,6 +1198,8 @@ class CallAgent:
             return "แจ้งการบันทึกเสียงและขอความยินยอม"
         if c.consent == "pending":
             return "รอคำตอบว่ายินยอมให้บันทึกเสียงไหม ถ้ายังไม่ชัด ถามอีกครั้งอย่างสุภาพ"
+        if c.comment_open:
+            return _HEAR_OUT
         if c.feedback_pending:
             return f"ถามเหตุผลที่ให้คะแนน {c.feedback_pending} ต่ำ"
         for item in self.items:
@@ -1357,6 +1385,13 @@ class CallAgent:
             return f"ข้อ {answered} ลูกค้าตอบแล้ว ห้ามถามซ้ำ ให้ถามข้อถัดไปในรายการ"
         if out.get("end_call") and out.get("end_reason") == "completed" and unwilling and self._left_after(out):
             out["end_reason"] = "refused"  # "ไม่อยากตอบแล้ว": let the customer go, never hold them for the list
+        if c.comment_open and out.get("end_reason") in ("completed", "none"):
+            # 3 Nov B2B test: "ช้ามาก แล้วก็ ข้อมูลไม่ค่อยตรง" got a long apology, a goodbye that could not be
+            # interrupted, and the line went dead while the customer still had more to say.
+            if out.get("end_call") or not _asks_anything(lines):
+                return f"{_HEAR_OUT} ยังไม่ต้องปิดสาย (END: none)"
+            if len(_flat(reply)) > 120:
+                return "พูดยาวเกินไป ลูกค้ากำลังให้ความคิดเห็น ตอบรับสั้นๆ ประโยคเดียว แล้วถามว่ามีอะไรเพิ่มเติมอีกไหม"
         if (
             out.get("end_call")
             and out.get("end_reason") == "completed"
@@ -1515,7 +1550,8 @@ class CallAgent:
                 c.questions_asked = True
             elif name == "final_comment" and status in ("done", "feedback", "answered"):
                 c.final_comment = True
-                self.result.final_comment_raw = note or customer
+                # The customer's own words, kept by `reply` while they talk; the model's summary only if none.
+                self.result.final_comment_raw = self.result.final_comment_raw or note or customer
             elif name in fields or (
                 status == "confirmed" and any(i.id == name and i.kind == "fact" for i in self.items)
             ):
@@ -1831,6 +1867,7 @@ class CallAgent:
             if self.repair:
                 return [*self.car_acks, self._line("closing")]
             key = "more_questions" if isinstance(self.base, PAEngine) else "final_comment"
+            key = "final_comment_more" if c.comment_open else key
             return [self._line(key)]
         if c.identity != "confirmed":
             return [self._line("identity_recheck")]
@@ -1839,6 +1876,10 @@ class CallAgent:
         return [x.text for x in self.base._seg("intro")]
 
 
+_HEAR_OUT = (
+    "ลูกค้ากำลังให้ความคิดเห็น: รับฟัง ขอบพระคุณหรือขออภัยสั้นๆ ประโยคเดียว ไม่ต้องสรุปหรือรับปากยาว"
+    " แล้วถามว่ามีอะไรเพิ่มเติมอีกไหม ปิดสายเมื่อลูกค้าบอกว่าไม่มีแล้วเท่านั้น"
+)
 _POLICY_EXAMPLE = """ตัวอย่าง (ลูกค้าเพิ่งยืนยันกลุ่มความคุ้มครอง)
 SAY: ส่วนเบี้ยประกันภัย 2,000 บาทต่อปี ชำระผ่านบัตรเครดิตเรียบร้อยแล้ว และกรมธรรม์เริ่มคุ้มครองวันที่ 15 ตุลาคม 2569 เวลา 00.01 น. นะคะ
 SAY: ส่วนนี้ถูกต้องไหมคะ

@@ -64,6 +64,9 @@ wording:
   final_comment:
     status: kpi_source
     segments: ["เพื่อพัฒนาบริการให้ดียิ่งขึ้น ไม่ทราบว่าคุณลูกค้ามีข้อเสนอแนะ หรือคำติชมเพิ่มเติมไหมคะ"]
+  final_comment_more:
+    status: poc_approved
+    segments: ["ขอบพระคุณสำหรับความคิดเห็นนะคะ ไม่ทราบว่ามีเรื่องอื่นเพิ่มเติมอีกไหมคะ"]
   escalation_ack:
     status: poc_approved
     segments: ["ดิฉันบันทึกเรื่องนี้ไว้ให้เจ้าหน้าที่ติดต่อกลับนะคะ"]

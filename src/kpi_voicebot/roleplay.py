@@ -774,6 +774,22 @@ SCENARIOS: list[Scenario] = [
         ],
     ),
     Scenario(
+        "sv_long_comment",
+        "survey-no-surveyor",
+        "a closing comment in two parts, then nothing more (3 Nov B2B test)",
+        "คุณชื่อสมชาย ยินยอมบันทึกเสียง ตอบ 4, 4 ภาพรวม 8 "
+        "พอถูกถามข้อเสนอแนะ ให้ตอบว่า 'ผมรู้สึกว่าเจ้าหน้าที่ให้บริการช้ามาก แล้วก็ข้อมูลไม่ค่อยตรง' "
+        "ถ้าบอทถามว่ามีอะไรเพิ่มเติมอีกไหม ให้ตอบว่า 'อีกเรื่องคือโทรไปศูนย์แล้วรอสายนานมากครับ' แล้วครั้งต่อไปตอบว่า 'ไม่มีแล้วครับ'",
+        outcomes={OC.SURVEY_COMPLETED},
+        checks=[
+            lambda c: (
+                None
+                if "รอสาย" in (c.agent.result.final_comment_raw or "")
+                else f"the second comment was never heard: {c.agent.result.final_comment_raw!r}"
+            )
+        ],
+    ),
+    Scenario(
         "sv_already_answered",
         "survey-no-surveyor",
         "complains when a score is asked again",

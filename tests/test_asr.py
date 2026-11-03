@@ -194,3 +194,17 @@ async def test_soniox_stream_turns_tokens_into_partials_and_commits() -> None:
         ("partial", "ผม"),
         ("final", "ผมเอง"),
     ]
+
+
+async def test_a_turn_that_stops_mid_sentence_waits_for_the_rest() -> None:
+    collector = TurnCollector(hold=0.6)
+
+    async def speak() -> None:
+        collector.feed(event("commit", "ผมรู้สึกว่าเจ้าหน้าที่ให้บริการช้ามาก แล้วก็."))
+        await asyncio.sleep(0.4)  # longer than a short answer's wait, shorter than the hold
+        collector.feed(event("commit", "ข้อมูลไม่ค่อยตรง"))
+
+    task = asyncio.ensure_future(speak())
+    turn = await collector.next_turn("confirm:medical", silence_timeout=3)
+    assert turn == "ผมรู้สึกว่าเจ้าหน้าที่ให้บริการช้ามาก แล้วก็. ข้อมูลไม่ค่อยตรง"
+    await task
