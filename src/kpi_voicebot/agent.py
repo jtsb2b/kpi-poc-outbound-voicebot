@@ -75,6 +75,7 @@ SOFT_PROBLEMS = (
     "ถามซ้ำต้องมีคำนำ",
     "ประโยคสุดท้ายต้องลงท้าย",
     "พูดยาวเกินไป",
+    "ไม่ต้องขออภัย",
     "รับคะแนนแล้ว",
     "ตอนแนะนำตัวต้องบอก",  # a missed introduction is made next turn; a fixed intro line ignores the customer
     "ลูกค้าเพิ่งถาม",  # answered and said goodbye twice: better than a fallback that drops the answer
@@ -198,6 +199,7 @@ END: <เหตุผล> [| เวลาที่ลูกค้าสะดว
   ข้ออื่นในกลุ่มเดียวกันที่ลูกค้าได้ยินแล้ว ระบบถือว่ายืนยันให้เอง
 - คำถามสำรวจ (รหัสในรายการ): answered พร้อมคะแนน เช่น "UPDATE: q2 answered 3 | ให้ 3 คะแนน" | not_applicable
   | feedback (ใส่เหตุผลหรือข้อเสนอแนะหลัง |) ทุกครั้งที่ลูกค้าให้คะแนน ต้องมี UPDATE ของข้อนั้นในตาเดียวกัน
+  คะแนนเป็นจำนวนเต็มเท่านั้น "หนึ่งครึ่ง" = 1.5 "สองครึ่ง" = 2.5 ห้ามปัดเอง ให้ถามว่าจะให้ 1 หรือ 2 คะแนน
 - questions done (ถามแล้วว่ามีคำถามเพิ่มไหม และลูกค้าไม่มีแล้ว) | final_comment done | <ข้อเสนอแนะ>
 {codes}ประเภท FOLLOW_UP: question_follow_up (คำถามที่ตอบไม่ได้) complaint claim_dispute safety urgent
 เหตุผล END: none (ยังคุยต่อ) completed (ครบทุกข้อแล้ว ตานี้พูดลา) wrong_person refused (ไม่ต้องการคุย)
@@ -297,6 +299,9 @@ def tidy(lines: list[str]) -> list[str]:
         line = re.sub(r"(ค่า|จ้า|จ้ะ)(?=\s|$)", "ค่ะ", line)
         line = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", line).replace("https://", "").replace("http://", "")
         line = re.sub(r"[*`#\"“”]+", "", line).strip()
+        # "ให้กี่คะแนนดีคะ (คะแนนจาก 1 ถึง 5 นะคะ)ค่ะ" (4 Nov call): brackets are read out as they stand.
+        line = re.sub(r"\s+", " ", re.sub(r"\(([^()]*)\)", r" \1 ", line)).strip()
+        line = re.sub(r"(นะคะ|ค่ะ|คะ)\s*ค่ะ$", r"\1", line)
         # "โอ้โห ขออภัย..." / "โอ้ 1 คะแนนนะคะ": an exclamation, or the customer's "โอ้" echoed, is not
         # how an agent speaks to a customer.
         line = re.sub(r"^(โอ้โห|โอ้|ว้าว|อุ๊ย|เอ่อ)\s*", "", line)
@@ -363,6 +368,28 @@ def _consents(text: str) -> bool:
 
 
 _CALL_AGAIN = re.compile(r"โทร(มา|กลับ|หา|ใหม่)\S{0,12}(อีก|ใหม่|ถาม)|โทรกลับ|ติดต่อกลับ|โทรมาอีก")
+
+
+def _sorry(item: Item, score: Any) -> bool:
+    """An apology fits a really low score; 5 out of 10 is not a complaint (4 Nov: "ขออภัย" to a 5)."""
+    try:
+        return float(score) <= _sorry_max(item)
+    except TypeError, ValueError:
+        return False
+
+
+def _sorry_max(item: Item) -> int:
+    low, high = item.scale
+    return int(low + (high - low) * 0.4)
+
+
+def _how_to_ask_why(item: Item, score: Any) -> str:
+    ask = re.sub(r"^ขออภัยในความไม่สะดวกค่ะ\s*", "", item.feedback_question)
+    if _sorry(item, score):
+        return f"ขออภัยสั้นๆ แล้วถามสั้นๆ ว่าอยากให้ปรับปรุงตรงไหน เช่น '{ask}'"
+    return f"คะแนนกลางๆ ไม่ต้องขออภัย ขอบคุณแล้วถามสั้นๆ ว่าอยากให้ปรับปรุงเรื่องไหน เช่น '{ask}'"
+
+
 _NOTHING_MORE = re.compile(r"ไม่มี|พอแล้ว|แค่นี้|เท่านี้|หมดแล้ว|เรียบร้อย|ขอบคุณ")
 MAX_COMMENT_ROUNDS = 3
 
@@ -384,6 +411,8 @@ def _gave_reason(text: str) -> bool:
     return bool(re.search(r"เพราะ|เนื่องจาก|ตรงที่", text)) or len(_HESITATION.sub("", text)) >= 12
 
 
+# Asking for a score: "ให้กี่คะแนนดีคะ", "คะแนนเท่าไหร่", "ตั้งแต่ 1 ถึง 5 เท่าไหร่ดีคะ" (4 Nov suite).
+_SCORE_ASK = re.compile(r"กี่คะแนน|ให้กี่|เท่าไหร่|เท่าไร")
 _QUESTION_WORDS = re.compile(r"กี่|ไหม|มั้ย|อะไร|อย่างไร|ยังไง|เท่าไหร่|หรือเปล่า|ไหน|เมื่อไหร่")
 
 
@@ -656,6 +685,7 @@ class CallAgent:
                 self._task("callback", "ลูกค้าขอให้โทรกลับอีกครั้ง", customer)
         feedback_was_asked = self.check.feedback_asked
         c = self.check
+        consent_before = c.consent
         # Every score was in before this turn (the last one's "why" included): what the customer says now
         # is a closing comment, never a score just answered.
         closing_talk = (
@@ -744,15 +774,20 @@ class CallAgent:
             # The reply's wording failed, but what the customer answered still counts: in the 19 Oct
             # tests a fallback dropped "3 ครับ" and asked the same question again.
             self._apply({**out, "end_call": False, "follow_up": {}}, customer, settled_only=True)
+            # 4 Nov call: a fallback after "อยากให้พนักงานถึงไวกว่านี้" asked the same why again.
+            self._take_reason(feedback_was_asked, customer)
             return self._fallback(customer)
         self._apply(out, customer)
         if c.comment_open:
             c.comment_rounds += 1
-        if feedback_was_asked and c.feedback_pending == feedback_was_asked:
-            # Asked once already: take what the customer said as the reason and move on, never ask twice.
-            answer = next(a for a in self.result.survey_answers if a.question == feedback_was_asked)
-            answer.feedback_raw = answer.feedback_raw or customer
-            c.feedback_pending = None
+        self._take_reason(feedback_was_asked, customer)
+        if consent_before == "pending" and c.consent == "granted" and out["reply"]:
+            # "ยินดีบันทึกเสียงเรียบร้อยค่ะ" / "ยินดีนะคะ" to a yes (4 Nov call): the customer did the favour.
+            out["reply"][0] = re.sub(
+                r"^(ยินดี(บันทึกเสียง)?(เรียบร้อย)?(นะคะ|ค่ะ)?|ยินยอมนะคะ)\s*(ขอบ(พระ)?คุณ(ค่ะ)?)?\s*",
+                "ขอบพระคุณค่ะ ",
+                out["reply"][0],
+            ).strip()
         lines = [s.strip() for s in out["reply"] if without_tags(s)]
         if hanging and not out.get("end_call") and not _asks_anything(lines):
             # "ได้ค่ะ 5 คะแนนนะคะ" and nothing after it, twice: ask the next question in the approved words,
@@ -1187,7 +1222,8 @@ class CallAgent:
                 status = c.status[item.id]
                 score = f" (ได้ {status})" if status != "pending" else ""
                 why = (
-                    f" ถ้าได้ไม่เกิน {item.feedback_below} ให้ขออภัยแล้วถามเหตุผลสั้นๆ ก่อนไปข้อถัดไป (ถามครั้งเดียว)"
+                    f" ถ้าได้ไม่เกิน {item.feedback_below} ให้ถามเหตุผลสั้นๆ ก่อนไปข้อถัดไป (ถามครั้งเดียว)"
+                    f" ขออภัยเฉพาะเมื่อได้ไม่เกิน {_sorry_max(item)}"
                     if item.feedback_below >= item.scale[0]
                     else ""
                 )
@@ -1217,7 +1253,7 @@ class CallAgent:
             lines.append(f"ระบบบันทึกคำตอบเรื่องรถแล้ว: ตานี้รับทราบด้วยใจความนี้ก่อน (พูดด้วยคำของคุณเอง) แล้วไปขั้นถัดไป: {acks}")
         if c.feedback_pending:
             q = next(i for i in self.items if i.id == c.feedback_pending)
-            lines.append(f"ลูกค้าให้คะแนน {q.id} ต่ำ: ขออภัยแล้วถามสั้นๆ ว่าอยากให้ปรับปรุงตรงไหน เช่น {q.feedback_question}")
+            lines.append(f"ลูกค้าให้คะแนน {q.id} {c.status[q.id]}: {_how_to_ask_why(q, c.status[q.id])}")
         return "\n".join(lines)
 
     def next_step(self) -> str:
@@ -1401,6 +1437,22 @@ class CallAgent:
         limit += 12 if (_tells_recording(reply) or _tells_free_look(reply)) and not groups_read else 0
         if estimated_seconds([Segment(text=s) for s in lines]) > limit:
             return "พูดยาวเกินไป ทวนได้ทีละกลุ่ม ไม่เกินประมาณ 20 วินาที"
+        half = self._half_options(customer)
+        if half:
+            # 4 Nov call: "ให้ 1 ครึ่ง" was taken as 1. The scale is whole points: ask, never round.
+            value, options = half
+            rounded = any(u.get("status") == "answered" for u in out.get("updates") or [])
+            if rounded or not all(str(n) in reply for n in options):
+                either = " หรือ ".join(str(n) for n in options)
+                return (
+                    f"ลูกค้าให้ {value:g} คะแนน ('ครึ่ง' = .5) คะแนนต้องเป็นจำนวนเต็ม ห้ามปัดเอง"
+                    f" ถามว่าจะให้ {either} คะแนนดี (ไม่ต้อง UPDATE)"
+                )
+        apologises = bool(re.search(r"ขออภัย|ขอโทษ", reply) and re.search(r"ไม่สะดวก|ไม่ประทับใจ|ไม่พอใจ", reply))
+        for given_item, given in self._scored_now(out):
+            if apologises and not _sorry(given_item, given):
+                # "ขออภัยในความไม่สะดวก" to 5 out of 10 (4 Nov call) sounds like the bot was not listening.
+                return f"ไม่ต้องขออภัย ลูกค้าให้ {given_item.id} {given} จาก {given_item.scale[1]} ซึ่งไม่ได้แย่ ขอบคุณแล้วถามต่อ"
         for u in out.get("updates") or []:
             item = next((i for i in self.items if i.id == u.get("item") and i.kind == "score"), None)
             score = u.get("score")
@@ -1427,9 +1479,11 @@ class CallAgent:
             if "คะแนน" in last or not _asks_anything([last]):
                 # PM, 3 Nov 2026: a score below 3 gets its "why" before the next question; on the B2B calls
                 # that day the bot said "ได้ค่ะ 2 คะแนนนะคะ" and went straight on.
+                given_now = {i.id: str(n) for i, n in self._scored_now(out)}
+                low_score = given_now.get(why.id, c.status[why.id])
                 return (
-                    f"ลูกค้าให้ {why.id} คะแนนต่ำ: ขออภัยสั้นๆ แล้วถามเหตุผลก่อน ห้ามถามข้อถัดไปในตานี้"
-                    f" เช่น '{why.feedback_question}' (ยังต้อง UPDATE คะแนนข้อนี้)"
+                    f"ลูกค้าให้ {why.id} {low_score} คะแนน: ถามเหตุผลก่อน ห้ามถามข้อถัดไปในตานี้"
+                    f" {_how_to_ask_why(why, low_score)} (ยังต้อง UPDATE คะแนนข้อนี้)"
                 )
         scored = bool(self.rule_scored) or any(u.get("status") == "answered" for u in out.get("updates") or [])
         if scored and not out.get("end_call") and not _asks_anything(lines):
@@ -1443,9 +1497,15 @@ class CallAgent:
         answered = self._asks_answered_score(lines, out)
         if answered:
             return f"ข้อ {answered} ลูกค้าตอบแล้ว ห้ามถามซ้ำ ให้ถามข้อถัดไปในรายการ"
+        skipped = self._skips_ahead(lines, out)
+        if skipped is not None:
+            # 4 Nov suite: q1, then straight to q5; q2 was asked at the very end, after the comments.
+            return f"ถามตามลำดับ ข้อถัดไปคือ {skipped.id}: {skipped.label} ตัวอย่างคำถาม: {skipped.approved}"
         if out.get("end_call") and out.get("end_reason") == "completed" and unwilling and self._left_after(out):
             out["end_reason"] = "refused"  # "ไม่อยากตอบแล้ว": let the customer go, never hold them for the list
-        if c.comment_open and out.get("end_reason") in ("completed", "none"):
+        stop = read_signals(customer)
+        # Any close the model picks ("refused" on a 4 Nov suite run) while the customer is still commenting.
+        if c.comment_open and not (stop.refuse or stop.dnc):
             # 3 Nov B2B test: "ช้ามาก แล้วก็ ข้อมูลไม่ค่อยตรง" got a long apology, a goodbye that could not be
             # interrupted, and the line went dead while the customer still had more to say.
             if out.get("end_call") or not _asks_anything(lines):
@@ -1484,6 +1544,40 @@ class CallAgent:
             return _flat(" ".join(item.label.split()[:2])) in said  # the plate, with or without the province
         return _flat(item.label)[:12] in said
 
+    def _half_options(self, customer: str) -> tuple[float, list[int]] | None:
+        """ "ให้ 1 ครึ่ง" to the score question just asked: the half point said and the whole points either side."""
+        heard = read_signals(customer).score
+        if heard.half is None:
+            return None
+        item = self._last_asked_score(" ".join(self.last_reply), [i for i in self.items if i.kind == "score"])
+        if item is None:
+            return None
+        low, high = item.scale
+        return heard.half, sorted({min(max(n, low), high) for n in heard.candidates})
+
+    def _scored_now(self, out: dict[str, Any]) -> list[tuple[Item, int]]:
+        """Scores given this turn: the model's UPDATEs and the one the rules settled."""
+        scored: list[tuple[Item, int]] = []
+        for u in out.get("updates") or []:
+            item = next((i for i in self.items if i.id == u.get("item") and i.kind == "score"), None)
+            if item is not None and u.get("status") == "answered" and isinstance(u.get("score"), int):
+                scored.append((item, u["score"]))
+        rule = next((i for i in self.items if i.id == self.rule_scored), None)
+        if rule is not None and self.check.status[rule.id].isdigit() and all(i is not rule for i, _ in scored):
+            scored.append((rule, int(self.check.status[rule.id])))
+        return scored
+
+    def _take_reason(self, asked: str | None, customer: str) -> None:
+        """The customer's answer to the "why" just asked: that score's reason, never asked twice. After the
+        last question it is the closing comment too (4 Nov: "ไม่มีครับ" was asked for comments again)."""
+        c = self.check
+        if asked and c.feedback_pending == asked:
+            answer = next(a for a in self.result.survey_answers if a.question == asked)
+            answer.feedback_raw = answer.feedback_raw or customer
+            c.feedback_pending = None
+        if asked and isinstance(self.base, SurveyEngine) and asked == self.items[-1].id:
+            c.final_comment = True
+
     def _was_asked(self, item: Item) -> bool:
         """A score question the bot has put to the customer, in the approved words or its own."""
         bot = [t for who, t in self.history if who == "bot"]
@@ -1505,15 +1599,36 @@ class CallAgent:
                 return item
         return None
 
+    def _skips_ahead(self, lines: list[str], out: dict[str, Any]) -> Item | None:
+        """The next score question when the reply asks a later one instead, else None."""
+        scored = [i for i in self.items if i.kind == "score"]
+        given = {i.id for i, _ in self._scored_now(out)}
+        pending = [i for i in scored if not self._done(i) and i.id not in given]
+        if not pending:
+            return None
+        for sentence in _sentences(lines):
+            if not _SCORE_ASK.search(sentence):
+                continue
+            fits = [(f, i) for i in scored if (f := _item_fit(i, sentence))[0] >= 0.75]
+            if fits:
+                item = max(fits, key=lambda p: p[0][0])[1]
+                if item in pending and item is not pending[0]:
+                    return pending[0]
+        return None
+
     def _asks_answered_score(self, lines: list[str], out: dict[str, Any]) -> str | None:
         """A score question the customer has already answered, asked again ("3 คะแนนนะคะ แล้วความพึงพอใจ
         โดยรวม… ให้กี่คะแนนดีคะ" right after "3"; 20 Oct call). Fine only when the customer is changing it."""
         changing = {u.get("item") for u in out.get("updates") or []}
         # Recorded this very turn and asked again ("ขออนุญาตบันทึกเป็น 3 คะแนนนะคะ … ให้กี่คะแนนดีคะ", 3 Nov).
-        just_answered = {u.get("item") for u in out.get("updates") or [] if u.get("status") == "answered"}
+        just_answered = {
+            u.get("item")
+            for u in out.get("updates") or []
+            if u.get("status") == "answered" and str(u.get("score")) != self.check.status.get(str(u.get("item")))
+        }
         scored = [i for i in self.items if i.kind == "score"]
         for sentence in _sentences(lines):
-            if not re.search(r"กี่คะแนน|ให้กี่|คะแนนเท่าไหร่", sentence):
+            if not _SCORE_ASK.search(sentence):
                 continue
             fits = [(f, i) for i in scored if (f := _item_fit(i, sentence))[0] >= 0.75]
             if not fits:
@@ -1910,6 +2025,10 @@ class CallAgent:
             # The customer wants to stop: thank them and let them go, never the next question.
             self._close("do_not_call" if s.dnc else "refused", "")
             return self._say([self._line("refuse_close")], "close", end=True)
+        half = self._half_options(customer)
+        if half:
+            either = " หรือ ".join(str(n) for n in half[1])
+            return self._say([f"ขอโทษนะคะ คะแนนเป็นจำนวนเต็มค่ะ ไม่ทราบว่าข้อนี้จะให้ {either} คะแนนดีคะ"], "fallback")
         pending_score = next((i for i in self.items if i.kind == "score" and not self._done(i)), None)
         if s.question and "คะแนน" in customer and pending_score is not None:
             # "ต้องให้คะแนนยังไง" has an answer: the scale, never "no confirmed information".
@@ -1944,8 +2063,10 @@ class CallAgent:
         if c.identity != "confirmed" and self.campaign.party == "garage":
             return [self._line("identity_recheck")]
         if c.notice and c.feedback_pending:
-            ask = next(i for i in self.items if i.id == c.feedback_pending).feedback_question
-            return [ask if "ขออภัย" in ask else f"ต้องขออภัยในความไม่สะดวกนะคะ {ask}"]
+            q = next(i for i in self.items if i.id == c.feedback_pending)
+            ask = re.sub(r"^ขออภัยในความไม่สะดวกค่ะ\s*", "", q.feedback_question)
+            sorry = _sorry(q, c.status[q.id])
+            return [f"ต้องขออภัยในความไม่สะดวกนะคะ {ask}" if sorry else f"ขอบคุณค่ะ {ask}"]
         if c.notice:
             pending = next((i for i in self.items if not self._done(i)), None)
             if pending is not None and pending.kind == "status":

@@ -774,6 +774,15 @@ SCENARIOS: list[Scenario] = [
         ],
     ),
     Scenario(
+        "sv_half_point",
+        "survey-no-surveyor",
+        "gives one and a half, then picks 2 (4 Nov B2B test)",
+        "คุณชื่อสมชาย ยินยอมบันทึกเสียง ข้อแรกตอบว่า 'ให้หนึ่งครึ่งครับ' ถ้าบอทถามให้เลือกจำนวนเต็ม ให้ตอบ 2 "
+        "ถ้าถามเหตุผลให้ตอบว่า 'โทรติดยากครับ' ข้อสอง 4 ภาพรวม 7 ไม่มีข้อเสนอแนะ",
+        outcomes={OC.SURVEY_COMPLETED},
+        checks=[scores_are(q1=2, q2=4, q5=7)],
+    ),
+    Scenario(
         "sv_long_comment",
         "survey-no-surveyor",
         "a closing comment in two parts, then nothing more (3 Nov B2B test)",

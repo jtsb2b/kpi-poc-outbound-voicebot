@@ -892,3 +892,89 @@ async def test_a_short_no_ends_the_closing_comments() -> None:
     a.last_reply = ["ขอบพระคุณสำหรับความคิดเห็นนะคะ ไม่ทราบว่ามีเรื่องอื่นเพิ่มเติมอีกไหมคะ"]
     await a.reply("ไม่นะครับ")
     assert not a.check.comment_open
+
+
+Q3 = "ต่อมาในเรื่องความรวดเร็วในการเดินทางถึงที่เกิดเหตุของพนักงานสำรวจภัย คุณสมหมายให้กี่คะแนนจาก 1 ถึง 5 ดีคะ"
+Q5 = "ในเรื่องประสบการณ์ที่ได้รับจากการบริการในครั้งนี้ คุณสมหมายจะให้คะแนนจาก 0 ถึง 10 เท่าไหร่ดีคะ"
+
+
+def _survey_asking(question: str, replies: list[str], done: tuple[str, ...]):  # type: ignore[no-untyped-def]
+    a, model = agent("survey-surveyor", replies)
+    a.start()
+    ready(a)
+    for qid in done:
+        a.check.status[qid] = "4"
+    a.history.append(("bot", question))
+    a.last_reply = [question]
+    return a, model
+
+
+def test_half_points_are_heard_as_half_points() -> None:
+    from kpi_voicebot.thai_parse import parse_score
+
+    for said, half in [("ให้ 1 ครึ่งครับ", 1.5), ("สองครึ่ง", 2.5), ("หนึ่งจุดห้า", 1.5), ("ให้ 3.5 คะแนน", 3.5)]:
+        parsed = parse_score(said)
+        assert parsed.half == half and parsed.value is None, said
+    assert parse_score("ให้ 5 เต็มครับ").half is None
+
+
+def test_brackets_are_not_read_out_with_a_particle_after_them() -> None:
+    # 4 Nov call: "ให้กี่คะแนนดีคะ (คะแนนจาก 1 ถึง 5 นะคะ)ค่ะ"
+    assert tidy(["คุณสมหมายให้กี่คะแนนดีคะ (คะแนนจาก 1 ถึง 5 นะคะ)ค่ะ"]) == ["คุณสมหมายให้กี่คะแนนดีคะ คะแนนจาก 1 ถึง 5 นะคะ"]
+
+
+async def test_one_and_a_half_is_asked_back_never_rounded() -> None:
+    rounded = "SAY: ขออภัยในความไม่สะดวกด้วยนะคะ อยากให้ปรับปรุงเรื่องความรวดเร็วตรงไหนบ้างคะ\nUPDATE: q3 answered 1\nEND: none"
+    ask = "SAY: ขอโทษนะคะ คะแนนเป็นจำนวนเต็มค่ะ ไม่ทราบว่าข้อนี้จะให้ 1 หรือ 2 คะแนนดีคะ\nEND: none"
+    a, model = _survey_asking(Q3, [rounded, ask], ("q1", "q2"))
+    text = await say(a, "ให้ 1 ครึ่งครับ")
+    assert len(model.seen) == 2 and "1 หรือ 2" in text and a.check.status["q3"] == "pending"
+    a, _ = _survey_asking(Q3, [rounded, rounded], ("q1", "q2"))
+    assert "1 หรือ 2" in await say(a, "ให้ 1 ครึ่งครับ")  # the model never asks: the bot does
+
+
+async def test_a_middling_score_gets_no_apology() -> None:
+    sorry = "SAY: ขออภัยในความไม่สะดวกด้วยนะคะ ไม่ทราบว่ามีเรื่องไหนที่อยากให้เราปรับปรุงไหมคะ\nUPDATE: q5 answered 5\nEND: none"
+    thanks = "SAY: ขอบคุณค่ะ ไม่ทราบว่ามีเรื่องไหนที่อยากให้เราปรับปรุงไหมคะ\nUPDATE: q5 answered 5\nEND: none"
+    a, model = _survey_asking(Q5, [sorry, thanks], ("q1", "q2", "q3", "q4"))
+    text = await say(a, "5 แล้วกันครับ")  # 4 Nov call: "ขออภัยในความไม่สะดวก" to 5 out of 10
+    assert len(model.seen) == 2 and "ขออภัย" not in text
+
+
+async def test_a_reason_is_never_asked_for_twice_even_on_a_fallback() -> None:
+    bad = "SAY: เรื่องนี้รับประกันว่าจะดีขึ้นแน่นอนครับ\nEND: none"  # broken twice: the fallback speaks
+    a, _ = _survey_asking(Q3, [bad, bad], ("q1", "q2"))
+    a.check.status["q3"] = "1"
+    a.check.feedback_pending = a.check.feedback_asked = "q3"
+    a.last_reply = ["ขออภัยในความไม่สะดวกด้วยนะคะ อยากให้ปรับปรุงเรื่องความรวดเร็วตรงไหนบ้างคะ"]
+    text = await say(a, "อยากให้พนักงานถึงไวกว่านี้ครับ")
+    assert "ตรงไหนบ้าง" not in text and a.check.feedback_pending is None
+
+
+async def test_the_last_questions_why_is_the_closing_comment_too() -> None:
+    a, _ = _survey_asking(Q5, ["SAY: ขอบพระคุณมากค่ะ สวัสดีค่ะ\nEND: completed"], ("q1", "q2", "q3", "q4"))
+    a.check.status["q5"] = "7"
+    a.check.feedback_pending = a.check.feedback_asked = "q5"
+    a.last_reply = ["ได้ค่ะ 7 คะแนนนะคะ มีส่วนไหนที่อยากให้ทางเราปรับปรุงเพิ่มเติมไหมคะ"]
+    directive = await a.reply("ไม่มีครับ")  # 4 Nov call: asked for comments a second time
+    assert directive.end_call and a.check.final_comment
+
+
+async def test_a_yes_to_the_recording_is_thanked_not_welcomed() -> None:
+    a, _ = agent(
+        "survey-surveyor", ["SAY: ยินดีบันทึกเสียงเรียบร้อยค่ะ ในเรื่องความสะดวกในการติดต่อศูนย์รับแจ้งอุบัติเหตุ ให้กี่คะแนนดีคะ\nEND: none"]
+    )
+    a.start()
+    a.check.identity, a.check.ai_disclosed, a.check.available, a.check.notice = "confirmed", True, True, True
+    a.last_reply = ["ไม่ทราบว่าคุณสมหมายยินยอมให้บันทึกเสียงการสนทนาไหมคะ"]
+    text = (await a.reply("ยอมครับ")).text
+    assert text.startswith("ขอบพระคุณค่ะ") and "ยินดี" not in text
+
+
+async def test_the_score_questions_are_asked_in_order() -> None:
+    jump = "SAY: ได้ค่ะ 4 คะแนนนะคะ แล้วในเรื่องประสบการณ์ที่ได้รับจากการบริการในครั้งนี้ จะให้คะแนนจาก 0 ถึง 10 เท่าไหร่ดีคะ\nEND: none"
+    a, model = _survey_asking(
+        "ในเรื่องความสะดวกในการติดต่อศูนย์รับแจ้งอุบัติเหตุ ให้กี่คะแนนดีคะ", [jump, f"SAY: ได้ค่ะ 4 คะแนนนะคะ {Q2}\nEND: none"], ()
+    )
+    text = await say(a, "ให้ 4 ครับ")  # 4 Nov suite: q1, then straight to q5
+    assert len(model.seen) == 2 and "ศูนย์รับแจ้งอุบัติเหตุ" in text and "0 ถึง 10" not in text
