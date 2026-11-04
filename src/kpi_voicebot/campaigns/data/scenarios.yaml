@@ -220,7 +220,7 @@ scenarios:
       - "ใช่ค่ะ"
       - "ได้ค่ะ"
       - "ค่ะ"
-      - "สามค่ะ"
+      - "สองค่ะ"
       - "เอ้ย ขอเปลี่ยนเป็นห้าค่ะ"
       - "ข้อแรกขอเป็นสี่ดีกว่าค่ะ"
       - "สี่ค่ะ"
@@ -231,7 +231,7 @@ scenarios:
     expect:
       outcome: survey_completed
       answers: {q1: [answered, 4], q2: [answered, 4]}
-      changed_from: {q1: [3, 5]}
+      changed_from: {q1: [2, 5]}
   - id: survey_ranges
     campaign: accident_survey
     profile: survey-surveyor

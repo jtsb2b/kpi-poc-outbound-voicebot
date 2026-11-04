@@ -47,6 +47,8 @@ _NUMBER_WORDS = {
 _NUMBER_TOKEN = re.compile(r"\d+|" + "|".join(sorted(_NUMBER_WORDS, key=len, reverse=True)))
 _OUT_OF = re.compile(rf"({_NUMBER_TOKEN.pattern})\s*เต็ม\s*({_NUMBER_TOKEN.pattern})")
 _CHANGE_TO = re.compile(rf"(?:เป็น|เอา|ขอ|แก้เป็น)\s*({_NUMBER_TOKEN.pattern})")
+# "หนึ่งครึ่ง", "1 ครึ่ง", "สองจุดห้า", "2.5": half a point more (4 Nov B2B call: "ให้ 1 ครึ่ง" taken as 1).
+_HALF = re.compile(rf"({_NUMBER_TOKEN.pattern})\s*(?:ครึ่ง|จุด\s*ห้า|\.5(?!\d))")
 _QUESTION_REF = re.compile(r"ข้อ\s*(?:ที่)?\s*(แรก|สุดท้าย|\d+|หนึ่ง|สอง|สาม|สี่|ห้า)")
 _HEDGE = ("มั้ง", "ประมาณ", "น่าจะ", "คิดว่า", "ราวๆ", "ราว ๆ")
 _MAX_WORDS = ("เต็มเลย", "ให้เต็ม", "เต็มที่", "เต็มๆ", "เต็ม ๆ")
@@ -422,6 +424,7 @@ class ScoreParse:
     is_max: bool = False
     hedged: bool = False
     question_ref: str | None = None
+    half: float | None = None  # "หนึ่งครึ่ง" = 1.5: no score on a whole-number scale, ask which
 
     @property
     def ambiguous(self) -> bool:
@@ -438,6 +441,14 @@ def parse_score(text: str) -> ScoreParse:
     for phrase in _NUMBER_FALSE_FRIENDS:
         t = t.replace(phrase, " ")
 
+    half = _HALF.search(t)
+    if half and not re.match(r"\d", t[half.end() :]):
+        n = _number_value(half.group(1))
+        return ScoreParse(candidates=(n, n + 1), hedged=hedged, question_ref=question_ref, half=n + 0.5)
+
+    if "คะแนนเดียว" in t:  # "ให้คะแนนเดียวค่ะ เพราะว่า…" is 1 (3 Nov B2B call: read as the 0 in the reason)
+        return ScoreParse(1, hedged=hedged, question_ref=question_ref)
+
     out_of = _OUT_OF.search(t)
     if out_of:
         return ScoreParse(_number_value(out_of.group(1)), hedged=hedged, question_ref=question_ref)
@@ -453,6 +464,8 @@ def parse_score(text: str) -> ScoreParse:
         change = list(_CHANGE_TO.finditer(t))
         if change:
             return ScoreParse(_number_value(change[-1].group(1)), hedged=hedged, question_ref=question_ref)
+        if contains_any(t, _CORRECTION):
+            return ScoreParse(tokens[-1], hedged=hedged, question_ref=question_ref)  # "4 ครับ เอ้ย เอา 1"
 
     unique = tuple(dict.fromkeys(tokens))
     if len(unique) == 1:
