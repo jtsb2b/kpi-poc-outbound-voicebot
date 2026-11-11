@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     # since JaiASR went into maintenance on 15 Oct 2026) or the fine-tuned JaiASR (back 28 Oct 2026).
     asr_provider: Literal["soniox", "jai"] = "soniox"
     soniox_api_key: SecretStr | None = None
-    soniox_model: str = "stt-rt-v5"
+    soniox_model: str = "stt-rt-v6"  # v6 since 5 Nov 2026 (v5 before)
     # How long after speech stops Soniox may wait before ending the utterance (500-3000 ms).
     soniox_max_endpoint_delay_ms: int = Field(default=800, ge=500, le=3000)
     # JaiASR (JTS, Qwen3-ASR fine-tuned for Thai, 28 Oct 2026), streaming over WebSocket
@@ -84,9 +84,10 @@ class Settings(BaseSettings):
     # Short and constant: a long or changing style prompt makes the delivery drift.
     tts_style: str = (
         "a sweet, soft-spoken young Thai woman, an experienced and caring call-centre agent who smiles as "
-        "she talks; gentle and polite, never flat or robotic; natural everyday conversational speed like a "
-        "real Bangkok call-centre agent, not slow and not over-enunciated; steady tone from start to finish"
-    )
+        "she talks; gentle and polite, never flat or robotic; speaks noticeably fast and fluently, about 4 "
+        "percent quicker than a normal speaker, like an experienced Bangkok call-centre agent who has said these "
+        "lines many times; no lingering on words, no long pauses; steady tone from start to finish"
+    )  # PM, 4 Nov 2026: a little faster; measured ≈16% shorter than "natural everyday conversational speed"
     tts_cache_dir: str = ".local/tts_cache"
 
     # Phone calls: LiveKit Cloud + the project's outbound SIP trunk (owned by the user, never changed here)
@@ -104,6 +105,18 @@ class Settings(BaseSettings):
     # Noise reduction on the caller's audio, as in the inbound voicebot: ai-coustics QUAIL_VF_S and
     # nothing else (Krisp plus WebRTC suppression and gain control together clipped speech).
     phone_noise_cancellation: Literal["ai_coustics", "krisp", "none"] = "ai_coustics"
+
+    # Engine lab (PM, 5 Nov 2026): a second operator key that also unlocks the engine selector, to compare
+    # the pipeline with speech-to-speech engines on test calls. Unset: no lab, every call is the pipeline.
+    lab_operator_token: SecretStr | None = Field(default=None, min_length=12)
+    gemini_live_model: str = "gemini-3.8-live"
+    # Sulafat is the voice behind Agni Premium's "Iris" (Agni's pick for Thai): both engines sound the same.
+    gemini_live_voice: str = "Sulafat"
+    agni_api_key: SecretStr | None = None
+    agni_agent_id: str | None = None  # the agent whose prompt is "{{call_prompt}}" (see realtime.AGNI_PROMPT)
+    agni_base_url: str = "https://api.ravan.ai/api/v1"
+    # Reads the lab call's transcript into the result after hang-up (not live, so the stronger model).
+    lab_extract_model: str = "gemini-3.8-flash"
 
     # Call recording to Tencent COS (S3-compatible), approved by the PM on 8 Oct 2026. Off until set.
     cos_secret_id: SecretStr | None = None

@@ -1,4 +1,4 @@
-import type { Call } from "./api";
+import type { Call, EngineId } from "./api";
 
 export const CAMPAIGN_LABEL: Record<string, string> = {
   pa_confirmation: "ยืนยันกรมธรรม์ PA",
@@ -274,3 +274,10 @@ export function initials(name: string): string {
     .map((p) => (p.match(/[ก-ฮA-Za-z0-9]/) ?? [Array.from(p)[0]])[0])
     .join("");
 }
+
+/** The conversation engine of an engine-lab call (5 Nov 2026). */
+export const ENGINE_LABEL: Record<EngineId, string> = {
+  pipeline: "Pipeline",
+  agni: "Agni",
+  gemini_live: "Gemini Live",
+};

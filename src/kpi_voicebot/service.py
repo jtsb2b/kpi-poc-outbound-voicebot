@@ -33,6 +33,9 @@ class CallRequest(BaseModel):
     source: Annotated[ProfileSource | ImportSource, Field(discriminator="type")]
     scenario_id: str | None = None
     custom_script: list[Annotated[str, Field(max_length=300)]] | None = Field(default=None, max_length=40)
+    # Engine lab (5 Nov 2026): the conversation engine of a live test call. Only the lab key may pick
+    # anything but the pipeline (checked in the API).
+    engine: Literal["pipeline", "gemini_live", "agni"] = "pipeline"
 
     @field_validator("target_name")
     @classmethod
@@ -108,7 +111,14 @@ async def build_call_document(request: CallRequest, settings: Settings, store: S
             raise RequestRejected(409, "ลูกค้าเบอร์นี้ขอไม่ให้ติดต่อกลับ (ภายใน 6 เดือน)")
         if settings.livekit_missing():
             raise RequestRejected(409, "ยังตั้งค่าระบบโทรศัพท์ไม่ครบ (LiveKit / ระบบรู้จำเสียง / ระบบเสียงพูด)")
-    else:
+        from kpi_voicebot.realtime import lab_missing
+
+        missing = lab_missing(settings, request.engine)
+        if missing:
+            raise RequestRejected(409, f"ยังตั้งค่าเครื่องยนต์ {request.engine} ไม่ครบ: {', '.join(missing)}")
+    elif request.engine != "pipeline":
+        raise RequestRejected(422, "เครื่องยนต์ทดลองใช้ได้เฉพาะการโทรจริง")
+    if request.mode is not CallMode.LIVE:
         if request.custom_script:
             script = [line for line in request.custom_script if line.strip()]
         elif request.scenario_id:
@@ -141,4 +151,5 @@ async def build_call_document(request: CallRequest, settings: Settings, store: S
         "case": case,
         "data_label": case.get("data_label", "MOCK"),
         "warnings": warnings,
+        "engine": request.engine,
     }

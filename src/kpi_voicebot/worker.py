@@ -269,21 +269,30 @@ class Worker:
             await store.set_lifecycle(call_id, Lifecycle.IN_CONVERSATION, dial_result=DialResult.ANSWERED.value)
             await store.add_event(call_id, "answered")
 
-        # The LLM-led agent when an LLM is configured (CONVERSATION_MODE=agent), otherwise scripted.
-        talk, dialogue = make_dialogue(engine, self.interpreter, self.responder, self.settings.conversation_mode)
-        make_phone = self.phone_factory or PhoneCall
-        phone = make_phone(
-            self.settings,
-            talk,
-            dialogue,
-            room_name=f"{self.settings.livekit_room_prefix}{call_id}",
-            sip_call_to=destination,
-            recording_key=object_key(self.settings, call_id, call["target_name"], call["campaign"]),
-            sink=sink,
-            is_canceled=lambda: store.is_cancel_requested(call_id),
-            on_ringing=ringing,
-            on_answered=answered,
-        )
+        phone_args: dict[str, Any] = {
+            "room_name": f"{self.settings.livekit_room_prefix}{call_id}",
+            "sip_call_to": destination,
+            "recording_key": object_key(self.settings, call_id, call["target_name"], call["campaign"]),
+            "sink": sink,
+            "is_canceled": lambda: store.is_cancel_requested(call_id),
+            "on_ringing": ringing,
+            "on_answered": answered,
+        }
+        lab = call.get("engine", "pipeline")
+        phone: Any
+        if lab != "pipeline":
+            # Engine lab: the same phone call with a speech-to-speech engine holding the conversation.
+            from kpi_voicebot.agent import CallAgent
+            from kpi_voicebot.realtime import RealtimePhoneCall, lab_engine
+
+            talk: Any = CallAgent(engine, None)
+            await store.add_event(call_id, "engine", {"engine": lab})
+            phone = RealtimePhoneCall(self.settings, talk, lab_engine(self.settings, lab, talk, call_id), **phone_args)
+        else:
+            # The LLM-led agent when an LLM is configured (CONVERSATION_MODE=agent), otherwise scripted.
+            talk, dialogue = make_dialogue(engine, self.interpreter, self.responder, self.settings.conversation_mode)
+            make_phone = self.phone_factory or PhoneCall
+            phone = make_phone(self.settings, talk, dialogue, **phone_args)
         answered_at_all = False
         try:
             end = await phone.run()

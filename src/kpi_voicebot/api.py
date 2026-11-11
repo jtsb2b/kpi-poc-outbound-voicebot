@@ -82,10 +82,26 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
     def get_store(request: Request) -> Store:
         return request.app.state.store  # type: ignore[no-any-return]
 
-    def require_operator(creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]) -> None:
-        expected = settings.operator_token.get_secret_value()
-        if creds is None or not hmac.compare_digest(creds.credentials.encode(), expected.encode()):
+    def operator_role(creds: HTTPAuthorizationCredentials | None) -> str | None:
+        """ "operator", "lab" (the engine-lab key: everything an operator can do, plus the engine
+        selector) or None."""
+        if creds is None:
+            return None
+        given = creds.credentials.encode()
+        lab = settings.lab_operator_token
+        if lab is not None and hmac.compare_digest(given, lab.get_secret_value().encode()):
+            return "lab"
+        if hmac.compare_digest(given, settings.operator_token.get_secret_value().encode()):
+            return "operator"
+        return None
+
+    def require_operator(creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]) -> str:
+        role = operator_role(creds)
+        if role is None:
             raise HTTPException(401, "ต้องเข้าสู่ระบบ", headers={"WWW-Authenticate": "Bearer"})
+        return role
+
+    RoleDep = Annotated[str, Depends(require_operator)]
 
     StoreDep = Annotated[Store, Depends(get_store)]
     auth = [Depends(require_operator)]
@@ -107,9 +123,14 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         return JSONResponse({"status": "ready", "mongo": True})
 
     @app.get("/api/v1/system/status", tags=["system"], dependencies=auth)
-    async def system_status(store: StoreDep) -> dict[str, Any]:
+    async def system_status(store: StoreDep, role: RoleDep) -> dict[str, Any]:
         active = await store.active_call()
+        from kpi_voicebot.realtime import ENGINES, lab_missing
+
         return {
+            "role": role,
+            # The engine lab, for the lab key only: which engines are ready to call with.
+            "engines": [{"id": e, "ready": not lab_missing(settings, e)} for e in ENGINES] if role == "lab" else None,
             "live_calls_enabled": settings.live_calls_enabled,
             "telephony_ready": settings.live_calls_enabled and not settings.livekit_missing(),
             "caller_id": settings.public_caller_id,
@@ -169,7 +190,10 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         request: CallRequest,
         store: StoreDep,
         idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=8, max_length=128)],
+        role: RoleDep,
     ) -> JSONResponse:
+        if request.engine != "pipeline" and role != "lab":
+            raise HTTPException(403, "เลือกเครื่องยนต์สนทนาได้เฉพาะรหัสทดลอง")
         doc = await build_call_document(request, settings, store)
         try:
             call, created = await store.create_call(doc, idempotency_key, fingerprint(request.model_dump(mode="json")))

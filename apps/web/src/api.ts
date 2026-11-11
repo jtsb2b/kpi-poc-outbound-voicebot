@@ -100,6 +100,7 @@ export interface Call {
   phone: { entered: string; e164: string | null; display: string; kind: string; sip_destination: string | null };
   source: { type: string; profile_id?: string; label?: string; row_number?: number; record_id?: string; filename?: string };
   data_label: string;
+  engine?: EngineId;
   lifecycle: string;
   dial_result: string | null;
   outcome: string | null;
@@ -145,7 +146,12 @@ export interface PhoneCheck {
   message?: string | null;
 }
 
+export type EngineId = "pipeline" | "gemini_live" | "agni";
+
 export interface SystemStatus {
+  role: "operator" | "lab";
+  /** The engine lab (lab key only): which conversation engines can place a call. */
+  engines: { id: EngineId; ready: boolean }[] | null;
   live_calls_enabled: boolean;
   telephony_ready: boolean;
   caller_id: string | null;

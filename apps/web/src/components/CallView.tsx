@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Api, Call } from "../api";
 import {
   CAMPAIGN_LABEL,
+  ENGINE_LABEL,
   LIFECYCLE_LABEL,
   OUTCOME_LABEL,
   elapsed,
@@ -62,6 +63,7 @@ export function CallView({ api, call, onNewCall, onOpenDetail }: Props) {
             <div className="call-meta num">
               {call.phone.display} · {CAMPAIGN_LABEL[call.campaign]}
               {call.mode === "simulation" ? " · จำลอง" : ""}
+              {call.engine && call.engine !== "pipeline" ? ` · ${ENGINE_LABEL[call.engine]}` : ""}
             </div>
           </div>
           <div className="call-status" aria-live="polite">

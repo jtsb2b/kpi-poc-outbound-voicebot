@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Api, Call } from "../api";
-import { CAMPAIGN_LABEL, LIFECYCLE_LABEL, OUTCOME_LABEL, formatTime, label, outcomeTone } from "../format";
+import { CAMPAIGN_LABEL, ENGINE_LABEL, LIFECYCLE_LABEL, OUTCOME_LABEL, formatTime, label, outcomeTone } from "../format";
 import { AlertIcon, ChevronRightIcon, ClockIcon, DownloadIcon, PhoneIcon } from "../icons";
 
 interface Props {
@@ -139,6 +139,7 @@ export function History({ api, refreshKey, onOpen, onGoCall }: Props) {
                     <td>
                       {CAMPAIGN_LABEL[c.campaign]}
                       {c.mode === "simulation" && <div className="muted">จำลอง</div>}
+                      {c.engine && c.engine !== "pipeline" && <div className="muted">{ENGINE_LABEL[c.engine]}</div>}
                     </td>
                     <td className="muted num">{formatTime(c.created_at)}</td>
                     <td>

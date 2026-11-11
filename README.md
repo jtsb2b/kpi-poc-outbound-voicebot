@@ -22,7 +22,7 @@ Each car's status and dates are in `result.vehicles` (UI, Excel export sheet `Ve
 | LLM: Gemini 3.5 Flash-Lite (`LLM_PROVIDER=gemini`, the default since 19 Oct 2026, chosen by the PM for Thai politeness); OpenThai 2.0 on the JTS gateway stays selectable (`LLM_PROVIDER=jts`) | done: leads the conversation from the knowledge base (agent mode); about 1.2–1.6 s per reply measured from Bangkok; approved wording on any error |
 | Thai phone politeness and grouped policy reading (research of 19 Oct 2026, `research_notes/Thai politeness and Gemini for voicebot/`) | done: softened questions, polite silence ladder, varied lines; policy read in four topic groups with one confirmation each; recording consent asked, a "no" deletes the audio and keeps the transcript; OIC calling hours (Mon–Sat 08:30–19:00) and a 6-month do-not-call block |
 | Voice: Gemini 3.8 Flash-Lite TTS with audio tags, voice Achernar (PM, 19 Oct 2026), Thai normaliser; JAI TTS selectable | done |
-| Speech recognition: Soniox real-time `stt-rt-v5` (`ASR_PROVIDER=soniox`, the default since 15 Oct 2026); the fine-tuned JaiASR `qwen3-asr-th-ft` is selectable with `ASR_PROVIDER=jai` (28 Oct 2026) | done: turn-taking (`TurnCollector`), Silero VAD, ai-coustics noise reduction on calls, microphone test mode |
+| Speech recognition: Soniox real-time `stt-rt-v6` (v6 since 5 Nov 2026) (`ASR_PROVIDER=soniox`, the default since 15 Oct 2026); the fine-tuned JaiASR `qwen3-asr-th-ft` is selectable with `ASR_PROVIDER=jai` (28 Oct 2026) | done: turn-taking (`TurnCollector`), Silero VAD, ai-coustics noise reduction on calls, microphone test mode |
 | Approved knowledge base for the LLM (`campaigns/knowledge/*.th.md`, built from the approved scripts and FAQ) | done: fixed prompt prefix (cached by the gateway), guarded so its facts can be used but not stretched |
 | LLM-led conversation (`agent.py`, `CONVERSATION_MODE=agent`, default with `INTERPRETER=llm`) | done: the model talks freely from the knowledge base against a checklist; code keeps the disclosures word for word, the facts exact, the results and the close; `scripted` keeps the old reworded-script mode |
 | Phone calls over LiveKit Cloud SIP (trunk `ST_NbZaAsMDs5Br`, From 2211 → 02-100-4148, ai-coustics QUAIL_VF_S on the caller's audio as in the inbound bot), shared voice loop with barge-in, `kpi-call` test command, live mode in the UI | done: live calls tested 14–16 Oct 2026; audio is laggy because LiveKit Cloud routes Bangkok through India (see `DEPLOYMENT_HANDOFF.md`) |
@@ -200,7 +200,7 @@ Latin reaches it:
 - House numbers keep their ทับ (99/9 → เก้าสิบเก้าทับเก้า) and postcodes are read digit by digit.
 The voice is chosen explicitly; neither is ever a fallback for the other.
 
-**Recognition.** Soniox real-time (`soniox_asr.py`, model `stt-rt-v5`, Thai with English hints) is the
+**Recognition.** Soniox real-time (`soniox_asr.py`, model `stt-rt-v6`, Thai with English hints) is the
 default since 15 Oct 2026, when JaiASR went into maintenance and fine-tuning. Each call passes its own terms
 (customer name, plan, beneficiary, e-mail) so they are recognised correctly; Soniox only uses them as hints.
 Soniox ends an utterance with its own endpoint detection (`SONIOX_MAX_ENDPOINT_DELAY_MS`, 800 ms by

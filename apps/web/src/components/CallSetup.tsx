@@ -5,11 +5,12 @@ import {
   type Call,
   type Campaign,
   type CampaignId,
+  type EngineId,
   type ImportResult,
   type PhoneCheck,
   type SystemStatus,
 } from "../api";
-import { caseSummary } from "../format";
+import { ENGINE_LABEL, caseSummary } from "../format";
 import { AlertIcon, CalendarIcon, CheckIcon, ChevronDownIcon, DownloadIcon, FileIcon, PhoneIcon, ShieldCheckIcon, StarIcon, UploadIcon, WrenchIcon } from "../icons";
 
 type SourceKind = "profile" | "import";
@@ -57,6 +58,12 @@ const CAMPAIGN_COPY: Record<
   },
 };
 
+const ENGINE_NOTE: Record<EngineId, string> = {
+  pipeline: "Soniox → Gemini 3.5 Flash-Lite → Gemini TTS (Achernar) · ระบบที่ใช้อยู่",
+  agni: "Agni Premium (เสียง Iris) · speech-to-speech · ผลสรุปอ่านจากบทสนทนาหลังวางสาย",
+  gemini_live: "Gemini 3.8 Live (เสียง Sulafat = Iris) · speech-to-speech · ผลสรุปอ่านจากบทสนทนาหลังวางสาย",
+};
+
 /** +6621004148 → 02-100-4148 */
 function callerDisplay(e164: string): string {
   const national = e164.startsWith("+66") ? `0${e164.slice(3)}` : e164;
@@ -78,6 +85,7 @@ export function CallSetup({
   const [campaignId, setCampaignId] = useState<CampaignId>(draft.campaignId);
   const [name, setName] = useState(draft.name);
   const [phone, setPhone] = useState(draft.phone);
+  const [engine, setEngine] = useState<EngineId>("pipeline");
 
   useEffect(
     () => onDraft({ campaignId, name, phone }),
@@ -138,7 +146,9 @@ export function CallSetup({
         : offHours
           ? `อยู่นอกเวลาโทร (${status?.calling_hours})`
           : null;
-  const canCall = Boolean(campaign && !missing && !busy && !submitting);
+  const lab = status?.role === "lab" ? status.engines : null;
+  const engineReady = !lab || Boolean(lab.find((e) => e.id === engine)?.ready);
+  const canCall = Boolean(campaign && !missing && engineReady && !busy && !submitting);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -150,6 +160,7 @@ export function CallSetup({
       target_name: name.trim(),
       phone: phone.trim(),
       mode: "live",
+      ...(lab ? { engine } : {}),
       source:
         sourceKind === "profile"
           ? { type: "profile", profile_id: profileId }
@@ -276,6 +287,31 @@ export function CallSetup({
           })}
         </div>
       </section>
+
+      {lab && (
+        <section className="section" aria-labelledby="s-engine">
+          <div className="section-head">
+            <h2 className="section-title" id="s-engine">
+              เครื่องยนต์สนทนา
+            </h2>
+            <div className="segmented" role="group" aria-labelledby="s-engine">
+              {lab.map((e) => (
+                <button
+                  key={e.id}
+                  type="button"
+                  aria-pressed={engine === e.id}
+                  disabled={!e.ready}
+                  title={e.ready ? undefined : "ยังตั้งค่าไม่ครบใน .env"}
+                  onClick={() => setEngine(e.id)}
+                >
+                  {ENGINE_LABEL[e.id]}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="section-note">{ENGINE_NOTE[engine]}</p>
+        </section>
+      )}
 
       <section className="section" aria-labelledby="s-who">
         <h2 className="section-title" id="s-who">

@@ -1,4 +1,4 @@
-"""Speech recognition: Soniox real-time (stt-rt-v5) over WebSocket, chosen with ASR_PROVIDER=soniox.
+"""Speech recognition: Soniox real-time (stt-rt-v6) over WebSocket, chosen with ASR_PROVIDER=soniox.
 
 Same interface as `asr.JaiASRStream`, so the turn-taking (`TurnCollector`) and the voice loop do
 not change: `partial` events carry everything heard in the current utterance (final tokens plus
