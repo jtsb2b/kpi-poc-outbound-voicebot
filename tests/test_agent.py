@@ -912,7 +912,10 @@ def _survey_asking(question: str, replies: list[str], done: tuple[str, ...]):  #
 def test_half_points_are_heard_as_half_points() -> None:
     from kpi_voicebot.thai_parse import parse_score
 
-    for said, half in [("ให้ 1 ครึ่งครับ", 1.5), ("สองครึ่ง", 2.5), ("หนึ่งจุดห้า", 1.5), ("ให้ 3.5 คะแนน", 3.5)]:
+    halves = [("ให้ 1 ครึ่งครับ", 1.5), ("สองครึ่ง", 2.5), ("หนึ่งจุดห้า", 1.5), ("ให้ 3.5 คะแนน", 3.5)]
+    # The unit between the number and the half, as Soniox v6 writes it (5 Nov 2026).
+    halves += [("ให้ 2 คะแนนครึ่งครับ", 2.5), ("สองคะแนนครึ่ง", 2.5)]
+    for said, half in halves:
         parsed = parse_score(said)
         assert parsed.half == half and parsed.value is None, said
     assert parse_score("ให้ 5 เต็มครับ").half is None

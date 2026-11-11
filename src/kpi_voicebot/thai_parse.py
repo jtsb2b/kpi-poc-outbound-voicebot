@@ -48,7 +48,8 @@ _NUMBER_TOKEN = re.compile(r"\d+|" + "|".join(sorted(_NUMBER_WORDS, key=len, rev
 _OUT_OF = re.compile(rf"({_NUMBER_TOKEN.pattern})\s*เต็ม\s*({_NUMBER_TOKEN.pattern})")
 _CHANGE_TO = re.compile(rf"(?:เป็น|เอา|ขอ|แก้เป็น)\s*({_NUMBER_TOKEN.pattern})")
 # "หนึ่งครึ่ง", "1 ครึ่ง", "สองจุดห้า", "2.5": half a point more (4 Nov B2B call: "ให้ 1 ครึ่ง" taken as 1).
-_HALF = re.compile(rf"({_NUMBER_TOKEN.pattern})\s*(?:ครึ่ง|จุด\s*ห้า|\.5(?!\d))")
+# "สองครึ่ง", "2.5", and with the unit between: "สองคะแนนครึ่ง", "ให้ 2 คะแนนครึ่ง" (Soniox v6 writes digits).
+_HALF = re.compile(rf"({_NUMBER_TOKEN.pattern})\s*(?:คะแนน\s*)?(?:ครึ่ง|จุด\s*ห้า|\.5(?!\d))")
 _QUESTION_REF = re.compile(r"ข้อ\s*(?:ที่)?\s*(แรก|สุดท้าย|\d+|หนึ่ง|สอง|สาม|สี่|ห้า)")
 _HEDGE = ("มั้ง", "ประมาณ", "น่าจะ", "คิดว่า", "ราวๆ", "ราว ๆ")
 _MAX_WORDS = ("เต็มเลย", "ให้เต็ม", "เต็มที่", "เต็มๆ", "เต็ม ๆ")
@@ -413,6 +414,17 @@ def contains_any(text: str, phrases: tuple[str, ...]) -> bool:
     return any(p in text for p in phrases)
 
 
+_COMPOUND = re.compile(r"(สอง|ยี่|สาม|สี่|ห้า|หก|เจ็ด|แปด|เก้า)?สิบ(เอ็ด|หนึ่ง|สอง|สาม|สี่|ห้า|หก|เจ็ด|แปด|เก้า)?")
+_TENS = {"สอง": 2, "ยี่": 2, "สาม": 3, "สี่": 4, "ห้า": 5, "หก": 6, "เจ็ด": 7, "แปด": 8, "เก้า": 9}
+
+
+def _compound_digits(m: re.Match[str]) -> str:
+    if not m.group(1) and not m.group(2):
+        return m.group(0)  # a bare "สิบ" is the word ten, as before
+    unit = 1 if m.group(2) in ("เอ็ด", "หนึ่ง") else _NUMBER_WORDS.get(m.group(2) or "", 0)
+    return f" {_TENS.get(m.group(1) or '', 1) * 10 + unit} "
+
+
 def _number_value(token: str) -> int:
     return int(token) if token.isdigit() else _NUMBER_WORDS[token]
 
@@ -440,6 +452,8 @@ def parse_score(text: str) -> ScoreParse:
         t = t[: ref_match.start()] + " " + t[ref_match.end() :]
     for phrase in _NUMBER_FALSE_FRIENDS:
         t = t.replace(phrase, " ")
+    # "สิบเอ็ด", "ยี่สิบแปด" as one number: they were read as 10, or as "10 or 8" (5 Nov: "สิบเอ็ด" became 10).
+    t = _COMPOUND.sub(_compound_digits, t)
 
     half = _HALF.search(t)
     if half and not re.match(r"\d", t[half.end() :]):
