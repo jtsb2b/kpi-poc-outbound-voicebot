@@ -60,8 +60,8 @@ const CAMPAIGN_COPY: Record<
 
 const ENGINE_NOTE: Record<EngineId, string> = {
   pipeline: "Soniox → Gemini 3.5 Flash-Lite → Gemini TTS (Achernar) · ระบบที่ใช้อยู่",
-  agni: "Agni Premium (เสียง Iris) · speech-to-speech · ผลสรุปอ่านจากบทสนทนาหลังวางสาย",
-  gemini_live: "Gemini 3.8 Live (เสียง Sulafat = Iris) · speech-to-speech · ผลสรุปอ่านจากบทสนทนาหลังวางสาย",
+  agni: "Agni Premium (เสียง Stella = Achernar) · speech-to-speech · ผลสรุปอ่านจากบทสนทนาหลังวางสาย",
+  gemini_live: "Gemini 3.8 Live (เสียง Achernar) · speech-to-speech · ผลสรุปอ่านจากบทสนทนาหลังวางสาย",
 };
 
 /** +6621004148 → 02-100-4148 */

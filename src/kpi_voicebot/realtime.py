@@ -5,8 +5,8 @@ speech-to-speech models on live test calls. The phone side stays the pipeline's:
 caller ID, room, recording, consent handling and records. Only the conversation changes: the
 customer's audio goes to the engine and the engine's voice comes back.
 
-- Gemini Live (`gemini-3.8-live`, voice Sulafat) on the existing Google key, straight from this worker.
-- Agni Premium (voice Iris, which is Sulafat) runs in Ravan's own LiveKit room, opened with a
+- Gemini Live (`gemini-3.8-live`, voice Achernar, as the pipeline) on the existing Google key, from this worker.
+- Agni Premium (voice Stella, which is Achernar) runs in Ravan's own LiveKit room, opened with a
   `web_call`; this worker joins it and carries the audio across, so Agni never touches our trunk.
 
 Neither engine keeps the pipeline's checklist while it talks, so the result is read from the
@@ -126,8 +126,9 @@ _GEMINI_STYLE = """น้ำเสียงและถ้อยคำ (ปร�
 # intensifiers ("พอดี…" 9 times, "…เลยนะคะ/เลยค่ะ" 18, "ได้เลย" 9), "ขอบคุณ" after almost every answer,
 # English fallbacks and one "ครับ". It has no checks after it, so it gets the words to use for each step.
 _AGNI_STYLE = """ถ้อยคำ (สำคัญที่สุด)
-น้ำเสียงของคุณเป็นธรรมชาติเหมือนคนจริงอยู่แล้ว สิ่งที่ต้องระวังคือคำที่เลือกใช้ ต้องสุภาพแบบพนักงานบริษัทประกันที่ดูแลลูกค้า
-ไม่ใช่แบบคุยกับเพื่อน
+น้ำเสียงของคุณเป็นธรรมชาติเหมือนคนจริงอยู่แล้ว สิ่งที่ต้องระวังคือคำที่เลือกใช้
+ค่อย ๆ พูด อย่าพูดเร็ว ต้องพูดให้ลูกค้าเข้าใจไม่ใช่รีบพูดให้มันจบ ๆ ไป
+ต้องสุภาพแบบพนักงานบริษัทประกันที่ดูแลลูกค้า ไม่ใช่แบบคุยกับเพื่อน
 - คำที่ห้ามใช้ (เป็นกันเองหรือห้วนเกินไปสำหรับลูกค้า):
   "พอดี…" ขึ้นต้นประโยค / "งั้น" / "…เลยนะคะ" "…เลยค่ะ" / "ได้เลย" / "ไม่มีปัญหา" / "เป็นยังไง" "ยังไงบ้าง"
   / "เอ่อ" "อ่า" "โอเค" / "ข้อถัดไปค่ะ" "คันถัดไปนะคะ" / "ครับ" / คำภาษาอังกฤษทุกคำ
