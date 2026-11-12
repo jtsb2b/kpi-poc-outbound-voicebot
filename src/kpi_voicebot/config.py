@@ -18,10 +18,15 @@ class Settings(BaseSettings):
 
     retention_days: int = Field(default=30, ge=1)
     live_calls_enabled: bool = False
-    # OIC (คปภ.) guideline for non-life sales calls: Monday to Saturday, 08:30-19:00 local time.
+    # OIC (คปภ.) guideline for non-life sales calls allows Monday to Saturday, 08:30-19:00 local time; KPI
+    # calls on working days only (4 Nov 2026): Monday to Friday, never on a holiday (campaigns/data/holidays.yaml).
     calling_start: str = Field(default="08:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
     calling_end: str = Field(default="19:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$|^24:00$")
-    calling_days: list[int] = [0, 1, 2, 3, 4, 5]  # Monday = 0
+    calling_days: list[int] = [0, 1, 2, 3, 4]  # Monday = 0
+    skip_holidays: bool = True
+    # Automatic gain on the customer's side of a phone call (WebRTC AGC): a soft-spoken customer is raised
+    # to a level the recogniser hears (KPI, 4 Nov demo). Off: the line's audio as it comes.
+    phone_gain_control: bool = True
     timezone: str = "Asia/Bangkok"
     allow_internal_extensions: bool = False
 
@@ -110,8 +115,9 @@ class Settings(BaseSettings):
     # the pipeline with speech-to-speech engines on test calls. Unset: no lab, every call is the pipeline.
     lab_operator_token: SecretStr | None = Field(default=None, min_length=12)
     gemini_live_model: str = "gemini-3.8-live"
-    # Sulafat is the voice behind Agni Premium's "Iris" (Agni's pick for Thai): both engines sound the same.
-    gemini_live_voice: str = "Sulafat"
+    # One voice on all three engines (12 Nov 2026): Achernar, the pipeline's TTS voice (`tts_voice`), and
+    # behind Agni Premium's "Stella" (the Ravan agent's voiceId), so a comparison is never about the voice.
+    gemini_live_voice: str = "Achernar"
     agni_api_key: SecretStr | None = None
     agni_agent_id: str | None = None  # the agent whose prompt is "{{call_prompt}}" (see realtime.AGNI_PROMPT)
     agni_base_url: str = "https://api.ravan.ai/api/v1"
@@ -127,8 +133,10 @@ class Settings(BaseSettings):
 
     @property
     def calling_window(self) -> str:
-        days = "จันทร์–เสาร์" if self.calling_days == [0, 1, 2, 3, 4, 5] else "วันที่กำหนด"
-        return f"{days} {self.calling_start}–{self.calling_end} น."
+        days = {(0, 1, 2, 3, 4): "จันทร์–ศุกร์", (0, 1, 2, 3, 4, 5): "จันทร์–เสาร์"}.get(
+            tuple(sorted(self.calling_days)), "วันที่กำหนด"
+        )
+        return f"{days} {self.calling_start}–{self.calling_end} น." + (" เว้นวันหยุด" if self.skip_holidays else "")
 
     @property
     def recording_enabled(self) -> bool:

@@ -21,6 +21,7 @@ import re
 from typing import Any
 
 from kpi_voicebot.agent import (
+    _BARE_NO,
     _OTHER_PERSON,
     MAX_COMMENT_ROUNDS,
     CallAgent,
@@ -31,6 +32,7 @@ from kpi_voicebot.agent import (
     _item_fit,
     _more_to_say,
     _sorry,
+    _takes_back_decline,
 )
 from kpi_voicebot.repair_engine import UNSURE, WHEN
 from kpi_voicebot.survey_engine import SurveyEngine
@@ -268,6 +270,11 @@ class Conductor:
             a._apply_item(spec, status, -1, text)
             if status == "confirmed":
                 return ok(f"ลูกค้ายืนยัน{spec.label}แล้ว")
+            if c.explain_due:
+                # An amount the customer has wrong: explained first (KPI, 4 Nov); still wrong, then staff.
+                say = a.next_step()
+                c.explain_due = None
+                return ok(f"{say} ถ้าลูกค้ายังยืนยันว่าไม่ตรง ให้บันทึกอีกครั้งว่า disputed")
             return ok(
                 "ลูกค้าแจ้งว่าข้อมูลไม่ตรง: ขอบคุณที่แจ้ง บอกว่าจะให้เจ้าหน้าที่ตรวจสอบ ห้ามเถียง ห้ามยืนยันว่าข้อมูลในระบบถูก ห้ามทวนทั้งกลุ่มใหม่"
             )
@@ -315,6 +322,12 @@ class Conductor:
     def _consent(self, status: str, text: str) -> dict[str, Any]:
         a = self.agent
         no, yes = _declines_recording(text), _consents(text)
+        if a.check.consent == "declined" and _takes_back_decline(text):
+            a._set_consent("granted")  # a "no" heard wrong, taken back: the recording goes on
+            return ok("ลูกค้ายินยอมให้บันทึกเสียง (แก้คำตอบ): ขอบพระคุณสั้นๆ แล้วไปต่อ")
+        if _BARE_NO.match(text) and not a.consent_checked:
+            a.consent_checked = True  # "ไม่ยอม" may be "ยอม" heard wrong (KPI, 4 Nov): asked once more
+            return fail("ฟังไม่ชัดว่ายินยอมหรือไม่ ถามอีกครั้งประโยคเดียว: ขอโทษนะคะ เพื่อความถูกต้อง ยินยอมให้บันทึกเสียง หรือไม่ยินยอมคะ")
         if no or (status == "declined" and not yes):
             a._set_consent("declined")
             return ok(f"ลูกค้าไม่ยินยอม (หยุดบันทึกเสียงแล้ว): พูดว่า '{a._peek_line('recording_declined')}' แล้วคุยต่อ")

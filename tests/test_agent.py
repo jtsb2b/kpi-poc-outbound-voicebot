@@ -269,24 +269,52 @@ async def test_a_value_said_without_its_brackets_still_counts_as_heard() -> None
     assert {f.field: f.status for f in a.result.policy_fields}["beneficiary"] == "confirmed"
 
 
+READ_COVERAGE = (
+    "SAY: ขออนุญาตทวนความคุ้มครองนะคะ แผนที่คุณลูกค้าทำไว้ คือแผนประกันอุบัติเหตุ พีเอ เต็มใจ "
+    "คุ้มครองกรณีเสียชีวิตจากอุบัติเหตุ 300,000 บาท ค่ารักษาพยาบาลต่ออุบัติเหตุแต่ละครั้ง 15,000 บาท "
+    "และเงินชดเชยรายได้วันละ 500 บาท สูงสุด 30 วันค่ะ\nSAY: ตรงกับที่คุณลูกค้าทราบไหมคะ\nEND: none"
+)
+EXPLAIN_DAILY = (
+    "SAY: ตามกรมธรรม์ เงินชดเชยรายได้คือวันละ 500 บาท สูงสุด 30 วัน จ่ายเมื่อต้องนอนโรงพยาบาลจากอุบัติเหตุค่ะ"
+    "\nSAY: ไม่ทราบว่าตรงกับที่คุณลูกค้าเข้าใจไหมคะ\nEND: none"
+)
+
+
 async def test_a_named_dispute_is_recorded_even_if_the_model_forgets_to_report_it() -> None:
-    # Role-play of 19 Oct: the bot apologised and moved on, but the dispute was never recorded.
-    a, _ = agent(
+    # Role-play of 19 Oct: the bot apologised and moved on, but the dispute was never recorded. Since the
+    # 4 Nov demo an amount is explained once first; still wrong after that, it goes to staff.
+    a, model = agent(
         "pa-email",
         [
-            "SAY: ขออนุญาตทวนความคุ้มครองนะคะ แผนที่คุณลูกค้าทำไว้ คือแผนประกันอุบัติเหตุ พีเอ เต็มใจ "
-            "คุ้มครองกรณีเสียชีวิตจากอุบัติเหตุ 300,000 บาท ค่ารักษาพยาบาลต่ออุบัติเหตุแต่ละครั้ง 15,000 บาท "
-            "และเงินชดเชยรายได้วันละ 500 บาท สูงสุด 30 วันค่ะ\\nSAY: ตรงกับที่คุณลูกค้าทราบไหมคะ\\nEND: none",
-            "SAY: ขอบคุณที่แจ้งนะคะ ดิฉันขออนุญาตบันทึกเรื่องเงินชดเชยรายได้ไว้ให้เจ้าหน้าที่ตรวจสอบนะคะ\\nEND: none",
+            READ_COVERAGE,
+            EXPLAIN_DAILY,
+            "SAY: ขอบคุณที่แจ้งนะคะ ดิฉันขออนุญาตบันทึกเรื่องเงินชดเชยรายได้ไว้ให้เจ้าหน้าที่ตรวจสอบนะคะ\nEND: none",
         ],
     )
     a.start()
     ready(a)
     await say(a, "ครับ")
     await say(a, "ไม่ใช่ครับ ชดเชยรายวันต้องวันละ 1,000 บาทครับ")
+    assert "อธิบายสั้นๆ ก่อนว่าตามกรมธรรม์ เงินชดเชยรายได้ (ต่อวัน) คือ 500 บาท/วัน" in model.seen[-1][-1]["content"]
+    assert not a.result.tasks and a.check.explain_due is None
+    await say(a, "ไม่ใช่ครับ ตอนซื้อเขาบอกวันละ 1,000 บาท")
     status = {f.field: f.status for f in a.result.policy_fields}
     assert status["daily_hospital"] == "disputed" and status["death_benefit"] == "confirmed"
     assert [(t.type, t.field) for t in a.result.tasks] == [("policy_discrepancy", "daily_hospital")]
+
+
+async def test_an_amount_the_customer_had_wrong_is_explained_and_nothing_goes_to_staff() -> None:
+    # KPI (4 Nov): "วงเงิน 300,000 แต่ลูกค้าเข้าใจว่า 400,000" should be explained before any hand-over.
+    a, _ = agent("pa-email", [READ_COVERAGE, EXPLAIN_DAILY, "SAY: ขอบคุณค่ะ\nUPDATE: plan_coverage confirmed\nEND: none"])
+    a.start()
+    ready(a)
+    await say(a, "ครับ")
+    await say(a, "ไม่ใช่ครับ ชดเชยรายวันต้องวันละ 1,000 บาทครับ")
+    await say(a, "อ๋อ เข้าใจแล้วครับ ถูกต้องครับ")
+    assert not a.result.tasks
+    assert all(
+        f.status == "confirmed" for f in a.result.policy_fields if f.field in ("daily_hospital", "death_benefit")
+    )
 
 
 async def test_the_model_words_the_recording_notice_itself_but_must_ask_for_consent() -> None:
@@ -324,6 +352,60 @@ async def test_declining_the_recording_stops_the_audio_and_the_call_goes_on() ->
     assert text.startswith("รับทราบค่ะ ดิฉันจะไม่บันทึกเสียงการสนทนานี้นะคะ")
 
 
+def test_a_soft_voice_is_asked_to_say_it_again_without_counting_as_silence() -> None:
+    a, _ = agent("pa-email", [])
+    a.start()
+    assert "พูดอีกครั้ง" in a.handle_unheard().text and a.state.silence_count == 0
+
+
+async def test_a_bare_no_to_the_recording_is_asked_once_more() -> None:
+    # KPI demo, 4 Nov: the customer said "ยอม" and the bot took it as "ไม่ยอม". A one-word "no" that would
+    # throw the audio away is checked once; the answer to that is taken as said.
+    a, model = agent(
+        "pa-email",
+        [
+            "SAY: ขอโทษนะคะ เพื่อความถูกต้อง ไม่ทราบว่าคุณสมชายยินยอมให้บันทึกเสียง หรือไม่ยินยอมคะ\n"
+            "UPDATE: recording declined\nEND: none",
+            "SAY: ขอบพระคุณค่ะ\nUPDATE: recording granted\nEND: none",
+        ],
+    )
+    a.start()
+    a.check.identity, a.check.ai_disclosed, a.check.available, a.check.notice = "confirmed", True, True, True
+    a._say(["การสนทนานี้มีการบันทึกเสียงนะคะ", "ไม่ทราบว่ายินยอมไหมคะ"], "turn")
+    await say(a, "ไม่ยอมครับ")
+    assert a.check.consent == "pending" and "ยินยอมให้บันทึกเสียง หรือไม่ยินยอมคะ" in model.seen[-1][-1]["content"]
+    await say(a, "ยินยอมครับ")
+    assert a.check.consent == "granted"
+
+
+async def test_a_no_heard_wrong_can_be_taken_back_and_the_recording_goes_on() -> None:
+    import asyncio
+
+    events: list[str] = []
+
+    async def paused() -> None:
+        events.append("paused")
+
+    async def resumed() -> None:
+        events.append("resumed")
+
+    a, _ = agent(
+        "pa-email",
+        [
+            "SAY: ไม่เป็นไรค่ะ เรื่องความคุ้มครองของคุณสมชาย แผนพีเอ เต็มใจค่ะ\nEND: none",
+            "SAY: ขอบพระคุณค่ะ ขออนุญาตทวนความคุ้มครองนะคะ\nEND: none",
+        ],
+    )
+    a.on_recording_declined, a.on_recording_granted = paused, resumed
+    a.start()
+    a.check.identity, a.check.ai_disclosed, a.check.available = "confirmed", True, True
+    a._say(["การสนทนานี้มีการบันทึกเสียงนะคะ", "ไม่ทราบว่ายินยอมไหมคะ"], "turn")
+    await say(a, "ไม่ยินยอมครับ")
+    await say(a, "อ้าว ไม่ใช่ครับ ยอมครับ บันทึกได้")
+    await asyncio.sleep(0)
+    assert events == ["paused", "resumed"] and a.result.recording_consent is True
+
+
 async def test_when_the_llm_is_down_the_bot_apologises_and_ends_instead_of_reading_a_script() -> None:
     # 19 Oct test call: every model call failed and fixed lines looped for minutes.
     from kpi_voicebot.llm import LLMError
@@ -348,6 +430,20 @@ async def test_the_greeting_is_the_models_own_when_prepared_in_time() -> None:
     a, _ = agent("pa-email", ["SAY: สวัสดีค่ะ ขออนุญาตเรียนสายคุณสมชาย ใจดี ค่ะ\nEND: none"])
     await a.prepare_opening()
     assert a.start().text == "สวัสดีค่ะ ขออนุญาตเรียนสายคุณสมชาย ใจดี ค่ะ"
+
+
+async def test_a_garage_is_told_at_once_the_call_is_automated() -> None:
+    # KPI (4 Nov demo): "เป็นการโทรจากระบบอัตโนมัติ" at the start of a garage call. An opening that leaves
+    # it out gives way to the script's line, which says it.
+    a, _ = agent("garage-three-cars", ["SAY: สวัสดีค่ะ ดิฉันน้องเคพีไอ ผู้ช่วย AI ค่ะ ใช่อู่ช.ทวีการช่างไหมคะ\nEND: none"])
+    await a.prepare_opening()
+    assert "ระบบอัตโนมัติ" in a.start().text
+    told, _ = agent(
+        "garage-three-cars",
+        ["SAY: สวัสดีค่ะ ดิฉันน้องเคพีไอ ผู้ช่วย AI สายนี้เป็นการโทรจากระบบอัตโนมัตินะคะ ใช่อู่ช.ทวีการช่างไหมคะ\nEND: none"],
+    )
+    await told.prepare_opening()
+    assert told.start().text.startswith("สวัสดีค่ะ ดิฉันน้องเคพีไอ ผู้ช่วย AI สายนี้")
 
 
 async def test_the_19_oct_survey_loop_scores_are_kept_and_never_guessed() -> None:

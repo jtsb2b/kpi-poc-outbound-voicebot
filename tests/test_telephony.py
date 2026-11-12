@@ -183,6 +183,8 @@ class FakePlayer:
 class FakeFront:
     speaking = False
     sustained = 0.0  # seconds of speech VAD reports right now
+    speech_started_at = 0.0
+    speech_ended_at = 0.0
 
     def capture(self, pcm: bytes) -> bytes:
         return pcm
@@ -377,3 +379,18 @@ async def test_the_goodbye_is_never_cut_and_the_line_stays_up_until_it_is_heard(
     await talk
     assert sink.turns[0] == ("bot", "close", True)
     assert time.monotonic() - started >= 0.7  # 0.4 s of goodbye, then the tail before hanging up
+
+
+def test_a_voice_heard_without_words_is_a_soft_spoken_customer_not_silence() -> None:
+    # KPI demo (4 Nov): the bot gave up on a customer who spoke softly. A voice the VAD heard while we
+    # waited, with no words recognised, gets "please say that again", never a step towards hanging up.
+    player, asr, sink, front = FakePlayer(), FakeASR(), Recorder(), FakeFront()
+    session, _ = phone_session(player, asr, sink, front)
+    now = time.monotonic()
+    session.wait_started = now - 9.0
+    front.speech_started_at, front.speech_ended_at = now - 5.0, now - 4.2  # 0.8 s of voice, no words
+    assert session._voice_without_words()
+    front.speech_started_at, front.speech_ended_at = now - 5.0, now - 4.9  # a click on the line
+    assert not session._voice_without_words()
+    front.speech_started_at, front.speech_ended_at = now - 8.8, now - 8.0  # the bot's own voice trailing off
+    assert not session._voice_without_words()

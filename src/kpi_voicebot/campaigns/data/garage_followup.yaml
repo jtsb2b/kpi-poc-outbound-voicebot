@@ -17,7 +17,8 @@ acknowledgements: ["ค่ะ", "รับทราบค่ะ", "ได้ค�
 wording:
   greet:
     status: poc_approved
-    segments: ["สวัสดีค่ะ ดิฉันน้องเคพีไอ ผู้ช่วย AI จากบริษัท กรุงไทยพานิชประกันภัยค่ะ ไม่ทราบว่าใช่อู่{garage_name}ไหมคะ"]
+    # KPI (4 Nov demo): the garage is told at once that this is an automated call.
+    segments: ["สวัสดีค่ะ ดิฉันน้องเคพีไอ ผู้ช่วย AI จากบริษัท กรุงไทยพานิชประกันภัย สายนี้เป็นการโทรจากระบบอัตโนมัตินะคะ ไม่ทราบว่าใช่อู่{garage_name}ไหมคะ"]
   identity_recheck:
     status: poc_approved
     segments: ["ขอโทษนะคะ ไม่ทราบว่าที่นี่ใช่อู่{garage_name}ไหมคะ"]

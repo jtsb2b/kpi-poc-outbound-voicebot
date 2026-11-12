@@ -134,6 +134,19 @@ def test_a_declined_recording_keeps_nothing() -> None:
     assert rec.discarded and len(rec.mix()) == 0
 
 
+def test_a_paused_recording_holds_silence_and_resumes() -> None:
+    # Declined, then taken back ("ยอม" heard as "ไม่ยอม", KPI demo 4 Nov): nothing from the pause is kept.
+    rec = recording.CallRecorder(Clock())
+    rec.customer(tone(1.0))
+    rec.pause()
+    rec.customer(tone(1.0))
+    rec.bot(tone(1.0), 16_000, plays_at=100.0)
+    rec.resume()
+    rec.customer(tone(1.0))
+    pcm = bytes(rec._customer)
+    assert len(pcm) == 3 * 32_000 and pcm[32_000:64_000] == bytes(32_000) and not rec._bot
+
+
 def test_the_recording_is_opus_in_ogg_of_the_right_length() -> None:
     import io
 

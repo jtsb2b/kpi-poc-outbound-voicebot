@@ -40,6 +40,9 @@ class CallRecorder:
         self.clock = clock or time.monotonic
         self.started = self.clock()
         self.discarded = False
+        # Declined: nothing is captured (silence keeps the two sides in step) until the customer takes the
+        # "no" back; still declined at hang-up, everything is discarded (`discard`) and nothing is stored.
+        self.paused = False
         self._customer = bytearray()  # continuous, from `_customer_at`
         self._customer_at: float | None = None
         self._bot: list[tuple[float, np.ndarray]] = []  # (when it plays, samples at RATE)
@@ -50,11 +53,11 @@ class CallRecorder:
             return
         if self._customer_at is None:
             self._customer_at = self.clock() - len(pcm) / 2 / RATE
-        self._customer += pcm
+        self._customer += bytes(len(pcm)) if self.paused else pcm
 
     def bot(self, pcm: bytes, rate: int, plays_at: float) -> None:
         """The bot's voice as handed to the line, with the time it will be heard."""
-        if self.discarded or len(pcm) < 2:
+        if self.discarded or self.paused or len(pcm) < 2:
             return
         samples = np.frombuffer(pcm[: len(pcm) // 2 * 2], dtype=np.int16)
         if rate != RATE:
@@ -71,6 +74,12 @@ class CallRecorder:
             heard = int((at - start) * RATE)
             kept.append((start, samples[:heard]))
         self._bot = kept
+
+    def pause(self) -> None:
+        self.paused = True
+
+    def resume(self) -> None:
+        self.paused = False
 
     def discard(self) -> None:
         """The customer declined the recording: keep nothing."""

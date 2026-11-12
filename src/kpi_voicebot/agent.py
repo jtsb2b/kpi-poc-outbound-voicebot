@@ -86,6 +86,12 @@ SOFT_PROBLEMS = (
 )
 
 
+# KPI (4 Nov demo): a customer who has an amount wrong ("วงเงิน 400,000" when the policy says 300,000) is
+# told what the policy says, and what it covers, before anything goes to staff; only a customer who still
+# says it is wrong after that is a discrepancy.
+EXPLAIN_FIRST = frozenset({"death_benefit", "medical_per_accident", "daily_hospital", "premium"})
+
+
 @dataclass
 class Item:
     """One thing the call must cover: a group of policy items read back together, a survey question, or a
@@ -122,6 +128,8 @@ class Checklist:
     feedback_asked: str | None = None  # the question whose "why" the bot has just asked
     comment_open: bool = False  # the customer is giving closing comments: hear them out, never hang up
     comment_rounds: int = 0  # times the bot asked "anything more?" after a comment
+    explained: set[str] = field(default_factory=set)  # amounts the customer disputed once and had explained
+    explain_due: tuple[str, str] | None = None  # (field, the customer's words): explain it this turn
 
 
 SYSTEM_PROMPT = """คุณคือ "น้องเคพีไอ" AI ผู้ช่วยเสียงผู้หญิงของ บริษัท กรุงไทยพานิชประกันภัย จำกัด (มหาชน) กำลังโทรหา{callee}
@@ -148,6 +156,9 @@ SYSTEM_PROMPT = """คุณคือ "น้องเคพีไอ" AI ผู
 - ถ้าลูกค้าพูดค่าเพี้ยนไปเพราะฟังไม่ชัด ให้ทวนใหม่ให้ชัด ยังไม่ต้องถือว่าไม่ตรง (disputed ใช้เมื่อลูกค้ายืนยันว่าข้อมูลผิด)
 - ถ้าลูกค้าบอกว่าในกลุ่มนั้นไม่ตรง แต่ไม่บอกว่าข้อไหน ให้ถามว่าข้อไหนไม่ตรงอย่างสุภาพ เมื่อรู้แล้ว ขอบคุณที่แจ้ง
   บอกว่าจะให้เจ้าหน้าที่ตรวจสอบ ห้ามเถียง ห้ามยืนยันว่าข้อมูลในระบบถูก ห้ามทวนทั้งกลุ่มใหม่ แล้วไปกลุ่มถัดไป
+- ยกเว้นจำนวนเงิน (วงเงินคุ้มครอง ค่ารักษา เงินชดเชย เบี้ยประกัน): ลูกค้ามักเข้าใจคลาดเคลื่อน ครั้งแรกให้อธิบายสั้นๆ ก่อน
+  ว่าตามกรมธรรม์ข้อนั้นคือเท่าไร คุ้มครองอะไร ถ้าตัวเลขของลูกค้าตรงกับข้ออื่น บอกว่าเป็นของข้อนั้น แล้วถามว่าตรงกับที่เข้าใจไหม
+  ถ้าลูกค้ายังยืนยันว่าไม่ตรง จึงบันทึกว่าไม่ตรง (UPDATE disputed) และบอกว่าจะให้เจ้าหน้าที่ตรวจสอบ
 - ถ้าตอบคำถามไม่ได้จากข้อมูลที่มี ให้บอกตรงๆ ว่ายังไม่มีข้อมูลยืนยัน จะให้เจ้าหน้าที่ติดต่อกลับ และใส่ FOLLOW_UP ห้ามเดา
 - ตัวเลข จำนวนเงิน วันที่ เวลา อีเมล เขียนให้ตรงกับข้อมูลทุกตัวอักษร ห้ามมีตัวเลขที่ไม่มีในข้อมูล
 - ห้ามสัญญา รับรอง หรือรับปากสิ่งที่ไม่มีในข้อมูล ห้ามใช้ Markdown ลิงก์ หรือ https เว็บไซต์ให้พูดว่า www.kpi.co.th
@@ -465,6 +476,18 @@ def _tells_recording(text: str) -> bool:
     return bool(re.search(r"บันทึกเสียง|อัดเสียง", text))
 
 
+# A bare "ไม่ยอม(ครับ)": one short word the recogniser can get wrong ("ยอม" heard as "ไม่ยอม", KPI demo,
+# 4 Nov) and a "no" that throws the audio away: asked once more before it is acted on.
+# "ไม่ยินยอมครับ" is clear enough to act on.
+_BARE_NO = re.compile(r"^\s*ไม่(ยอม)?\s*(ครับ|ค่ะ|คะ|นะ|จ้ะ|ฮะ)*\s*$")
+
+
+def _takes_back_decline(text: str) -> bool:
+    """ "ไม่ใช่ครับ ยอมครับ" / "บันทึกได้ครับ" right after the bot said it would not record."""
+    yes = re.search(r"(?<!ไม่)(?<!ไม่ยิน)(ยินยอม|ยอม)|(?<!ไม่)บันทึก(เสียง)?ได้|(?<!ไม่)อัด(เสียง)?ได้", text)
+    return bool(yes) and not _declines_recording(text) and not re.search(r"ไม่(ยิน)?ยอม", text)
+
+
 def _asks_consent(text: str) -> bool:
     return bool(re.search(r"(ยินยอม|อนุญาต|ได้ไหม|สะดวกให้).*คะ", text))
 
@@ -532,6 +555,9 @@ class CallAgent:
         self._line_turns: dict[str, int] = {}
         # Set by the phone call: stops and deletes the audio recording when the customer declines it.
         self.on_recording_declined: Callable[[], Awaitable[None]] | None = None
+        self.on_recording_granted: Callable[[], Awaitable[None]] | None = None  # a misheard "no" taken back
+        self.consent_check_due = False  # a bare "ไม่ยอม" to the recording question: ask once more which it is
+        self.consent_checked = False
         self._hooks: set[asyncio.Task[None]] = set()
         self.repair = isinstance(base, RepairEngine)
         self.car_acks: list[str] = []  # approved lines owed this turn for cars the rules just settled
@@ -558,7 +584,7 @@ class CallAgent:
         if self.campaign.party == "garage":
             prompt = (
                 "(อู่เพิ่งรับสาย ยังไม่ได้พูด) ทักทายสั้นๆ แนะนำตัวว่าดิฉันน้องเคพีไอ ผู้ช่วย AI จากกรุงไทยพานิชประกันภัย"
-                f" แล้วถามว่าใช่{name}ไหม ยังไม่ต้องถามเรื่องรถ"
+                f" บอกว่าสายนี้เป็นการโทรจากระบบอัตโนมัติ แล้วถามว่าใช่{name}ไหม ยังไม่ต้องถามเรื่องรถ"
             )
         elif self.repair:
             prompt = (
@@ -572,7 +598,9 @@ class CallAgent:
             return
         lines = tidy(parse_turn(text)["reply"])
         named = _flat(str(name).split(" ")[0]) in _flat(" ".join(lines))
-        if lines and not self.problem({"reply": lines}, "") and named:
+        # KPI (4 Nov): a garage is told at the start that the call is automated; otherwise the script's line.
+        automated = self.campaign.party != "garage" or "ระบบอัตโนมัติ" in " ".join(lines)
+        if lines and not self.problem({"reply": lines}, "") and named and automated:
             self.opening = lines
 
     async def _thai_name(self) -> None:
@@ -620,6 +648,11 @@ class CallAgent:
                         f.delivery = "full"
         self.state.last_delivery_complete = complete
 
+    def handle_unheard(self) -> Directive:
+        """The customer spoke, too softly for any words (the line heard a voice): ask again, politely,
+        without counting it as silence (KPI, 4 Nov: the bot gave up on a soft-spoken customer)."""
+        return self._say([self._line("say_again")], "silence")
+
     def handle_silence(self) -> Directive:
         """A polite ladder: check the customer is there, then suspect the line, then a face-saving goodbye."""
         self.state.silence_count += 1
@@ -651,7 +684,7 @@ class CallAgent:
         clone.history = list(self.history)
         clone.last_reply = list(self.last_reply)
         clone._line_turns = dict(self._line_turns)
-        clone.on_recording_declined = None  # a prepared turn never acts on the call
+        clone.on_recording_declined = clone.on_recording_granted = None  # a prepared turn never acts on the call
         clone.car_acks = list(self.car_acks)
         return clone
 
@@ -719,6 +752,7 @@ class CallAgent:
             # whatever the model makes of it.
             self.check.identity = "confirmed"
             self.result.identity_result = "confirmed"
+        explaining = c.explain_due  # given to the model in this turn's next step
         messages = self.messages(customer)
         problem = "no reply"
         out: dict[str, Any] = {}
@@ -782,6 +816,10 @@ class CallAgent:
             self._take_reason(feedback_was_asked, customer)
             return self._fallback(customer)
         self._apply(out, customer)
+        if c.explain_due is not None and (
+            c.explain_due is explaining or self._tells_amount(out["reply"], c.explain_due[0])
+        ):
+            c.explain_due = None  # explained in this turn
         if c.comment_open:
             c.comment_rounds += 1
         self._take_reason(feedback_was_asked, customer)
@@ -832,11 +870,17 @@ class CallAgent:
         if declines and c.consent == "granted":
             # "บอกแล้วว่าไม่ให้บันทึกเสียง": consent can be withdrawn at any time; the audio stops and is deleted.
             self._set_consent("declined")
+        self.consent_check_due = False
+        last_said = " ".join(self.last_reply)
+        if c.consent == "declined" and "ไม่บันทึกเสียง" in last_said and _takes_back_decline(customer):
+            self._set_consent("granted")  # "ไม่ใช่ครับ ยอมครับ" to "ดิฉันจะไม่บันทึกเสียง…": heard wrong
         if c.notice and c.consent == "pending":
             # A plain "ไม่" answers the recording question only when it was just asked: "ไม่มีล่ะครับ" to
             # "anything else?" deleted the audio of a call the customer had agreed to record (3 Nov).
             asked = _asks_consent(" ".join(self.last_reply))
-            if declines or (s.negative and not s.question and asked):
+            if asked and _BARE_NO.match(customer) and not self.consent_checked:
+                self.consent_check_due = self.consent_checked = True  # asked once more, then taken as said
+            elif declines or (s.negative and not s.question and asked):
                 self._set_consent("declined")
             elif _consents(customer) and not s.hedged:
                 self._set_consent("granted")
@@ -1265,6 +1309,21 @@ class CallAgent:
         c = self.check
         if c.identity != "confirmed":
             return "ยืนยันว่ากำลังเรียนสายกับลูกค้าถูกคน"
+        if self.consent_check_due:
+            who = self.vars.get("customer_first") or ""
+            return (
+                "ลูกค้าตอบเรื่องบันทึกเสียงสั้นๆ ซึ่งอาจฟังผิดได้ ถามให้ชัดอีกครั้งประโยคเดียว เช่น"
+                f' "ขอโทษนะคะ เพื่อความถูกต้อง ไม่ทราบว่าคุณ{who}ยินยอมให้บันทึกเสียง หรือไม่ยินยอมคะ" ยังไม่ต้องไปเรื่องอื่น'
+            )
+        if c.explain_due:
+            name, said = c.explain_due
+            f = next(f for f in self.result.policy_fields if f.field == name)
+            return (
+                f'ลูกค้าเข้าใจ{f.label}ไม่ตรงกับกรมธรรม์ (ลูกค้าพูดว่า "{said}") ยังไม่ต้องบอกว่าจะให้เจ้าหน้าที่ตรวจสอบ'
+                f" อธิบายสั้นๆ ก่อนว่าตามกรมธรรม์ {f.label} คือ {f.expected_value} คุ้มครองอะไร"
+                " ถ้าตัวเลขของลูกค้าตรงกับความคุ้มครองข้ออื่น ให้บอกว่าเป็นของข้อนั้น"
+                " แล้วถามอย่างสุภาพว่าตรงกับที่เข้าใจไหมคะ ห้ามเถียง"
+            )
         if not c.ai_disclosed and self.campaign.party == "garage":
             return f"แนะนำตัวสั้นๆ ว่า ดิฉันน้องเคพีไอ ผู้ช่วย AI แล้วบอกว่า{self._peek_line('intro')} แล้วถามคันแรก"
         if not c.ai_disclosed:
@@ -1748,6 +1807,8 @@ class CallAgent:
                 if _consents(customer):  # "ผมไม่อินกับพวกบันทึกเสียง" was taken as consent in the 19 Oct suite
                     self._set_consent("granted")
             elif name == "recording" and status == "declined":
+                if self.consent_check_due:
+                    continue  # a bare "ไม่ยอม": asked once more this turn
                 if _declines_recording(customer) or _asks_consent(" ".join(self.last_reply)):
                     self._set_consent("declined")
             elif name == "questions" and status == "done":
@@ -1808,8 +1869,12 @@ class CallAgent:
         c = self.check
         if c.consent == consent:
             return
-        c.consent = consent
+        before, c.consent = c.consent, consent
         self.result.recording_consent = consent == "granted"
+        if consent == "granted" and before == "declined" and self.on_recording_granted is not None:
+            task = asyncio.ensure_future(self.on_recording_granted())
+            self._hooks.add(task)
+            task.add_done_callback(self._hooks.discard)
         if consent == "declined":
             self.decline_ack_due = True
             if self.on_recording_declined is not None:
@@ -1817,8 +1882,17 @@ class CallAgent:
                 self._hooks.add(task)
                 task.add_done_callback(self._hooks.discard)
 
+    def _tells_amount(self, reply: list[str], name: str) -> bool:
+        """The reply says the policy's amount for this item (the model explained it of its own accord)."""
+        expected = next(f.expected_value for f in self.result.policy_fields if f.field == name)
+        return bool(_numbers(expected)) and _numbers(expected) <= _numbers(" ".join(reply))
+
     def _set_field(self, name: str, status: str, note: str) -> None:
         field_ = next(f for f in self.result.policy_fields if f.field == name)
+        if status == "disputed" and name in EXPLAIN_FIRST and name not in self.check.explained:
+            self.check.explained.add(name)  # explained first (KPI, 4 Nov); disputed if they still say so
+            self.check.explain_due = (name, note)
+            return
         field_.status = status  # type: ignore[assignment]
         if status == "confirmed":
             # First heard wrong, confirmed after hearing it again: no discrepancy to follow up.

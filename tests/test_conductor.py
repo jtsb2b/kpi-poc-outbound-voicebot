@@ -278,3 +278,28 @@ def test_a_rough_completion_time_in_words_is_a_date() -> None:
     ask(c, "กำลังซ่อมอยู่ครับ เพิ่งเริ่ม")
     out = ask(c, "น่าจะอีกสองสามวันครับ", "car1", "completion")
     assert out["ok"] and c.agent.result.vehicles[0].completion_text == "น่าจะอีกสองสามวันครับ"
+
+
+def test_an_amount_the_customer_has_wrong_is_explained_before_it_goes_to_staff() -> None:
+    # KPI (4 Nov demo): the customer thinks the cover is 400,000; the policy says 300,000. Explain first.
+    c = pa()
+    to_questions(c)
+    group = next(i for i in c.agent.items if "death_benefit" in i.fields)
+    c.bot_said(group.approved)
+    first = c.record(group.id, "disputed", words="ไม่ใช่ วงเงินเสียชีวิตต้อง 400,000 สิ")
+    assert first["ok"] and "อธิบายสั้นๆ ก่อนว่าตามกรมธรรม์" in first["say"] and not c.agent.result.tasks
+    again = c.record(group.id, "disputed", words="ไม่ใช่ วงเงินเสียชีวิตต้อง 400,000 ตอนซื้อเขาบอกแบบนั้น")
+    assert again["ok"] and [t.field for t in c.agent.result.tasks] == ["death_benefit"]
+
+
+def test_a_bare_no_to_the_recording_is_asked_once_more_and_can_be_taken_back() -> None:
+    c = pa()
+    c.bot_said("สวัสดีค่ะ ขออนุญาตเรียนสายคุณสมชาย ใจดี นะคะ")
+    assert c.record("identity", "confirmed", words="ครับ ผมพูดอยู่ครับ")["ok"]
+    c.bot_said("ดิฉันน้องเคพีไอ ผู้ช่วย AI จากกรุงไทยพานิชประกันภัย ไม่ทราบว่าตอนนี้สะดวกคุยไหมคะ")
+    assert c.record("availability", "available", words="ได้ครับ")["ok"]
+    c.bot_said(c.agent.notice_text)
+    first = c.record("recording", "declined", words="ไม่ยอมครับ")
+    assert not first["ok"] and c.agent.check.consent == "pending"
+    assert c.record("recording", "declined", words="ไม่ยอมครับ")["ok"] and c.agent.check.consent == "declined"
+    assert c.record("recording", "granted", words="ไม่ใช่ครับ ยอมครับ")["ok"] and c.agent.check.consent == "granted"

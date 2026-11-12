@@ -226,10 +226,16 @@ def test_live_calls_keep_to_the_oic_calling_hours(settings: Settings) -> None:
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
-    from kpi_voicebot.service import within_calling_hours
+    from kpi_voicebot.service import holiday_on, within_calling_hours
 
     bkk = ZoneInfo("Asia/Bangkok")
     assert within_calling_hours(settings, datetime(2026, 10, 19, 8, 30, tzinfo=bkk))  # Monday 08:30
     assert not within_calling_hours(settings, datetime(2026, 10, 19, 8, 29, tzinfo=bkk))
     assert not within_calling_hours(settings, datetime(2026, 10, 19, 19, 0, tzinfo=bkk))
     assert not within_calling_hours(settings, datetime(2026, 10, 18, 10, 0, tzinfo=bkk))  # Sunday
+    # KPI calls on working days only (4 Nov 2026): no Saturdays, no holidays.
+    assert not within_calling_hours(settings, datetime(2026, 10, 24, 10, 0, tzinfo=bkk))  # Saturday
+    assert not within_calling_hours(settings, datetime(2026, 12, 10, 10, 0, tzinfo=bkk))  # Constitution Day
+    assert within_calling_hours(settings, datetime(2026, 12, 11, 10, 0, tzinfo=bkk))
+    assert holiday_on(settings, datetime(2027, 4, 13, 10, 0, tzinfo=bkk)) == "วันสงกรานต์"
+    assert settings.calling_window == "จันทร์–ศุกร์ 08:30–19:00 น. เว้นวันหยุด"

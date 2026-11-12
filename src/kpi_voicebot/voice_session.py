@@ -37,7 +37,11 @@ from kpi_voicebot.tts_text import speakable
 
 log = logging.getLogger("kpi.voice")
 
-SILENCE_TIMEOUT = 7.0  # seconds of silence before the bot checks the customer is still there
+# Seconds of silence before the bot checks the customer is still there. KPI (4 Nov demo): the bot gave up
+# too soon on a customer who spoke softly; 7 s became 9 s, and a voice heard without words is never silence.
+SILENCE_TIMEOUT = 9.0
+UNHEARD_SPEECH = 0.4  # seconds of voice (VAD) with no words recognised: the customer spoke, too softly
+MAX_UNHEARD = 2  # "please say that again" in a row before the voice counts as silence after all
 ECHO_TAIL = 0.35  # half duplex: keep the mic muted this long after the bot stops (room reverb)
 SPOKEN_CHARS_PER_SECOND = 13.0  # JAI TTS pace, to map heard time onto segments
 BARGE_IN_SPEECH = 0.7  # seconds of sustained speech that count as cutting in (a "ครับ" is shorter)
@@ -70,7 +74,9 @@ def asr_context(engine: BaseEngine) -> str:
     """Names and values this call may hear, so the recogniser spells them right."""
     keys = ("customer_name", "plan_name", "beneficiary", "delivery_target", "payment_channel", "case_id")
     words = [engine.vars[k] for k in keys if engine.vars.get(k)]
-    return ", ".join(["น้องเคพีไอ", "กรุงไทยพานิชประกันภัย", *words])
+    # "ยอม" was heard as "ไม่ยอม" at the KPI demo (4 Nov): the answers to the recording question, spelled out.
+    consent = ["ยินยอม", "ไม่ยินยอม"] if engine.campaign.recording_notice else []
+    return ", ".join(["น้องเคพีไอ", "กรุงไทยพานิชประกันภัย", *words, *consent])
 
 
 def segments_heard(directive: Directive, played_seconds: float) -> int:
@@ -111,6 +117,8 @@ class VoiceSession:
         self.engine = engine
         self.dialogue = dialogue
         self.player = player
+        self.unheard = 0  # "please say that again" in a row, for a voice heard without words
+        self.wait_started = 0.0
         self.front = front
         self.asr = asr
         self.full_duplex = full_duplex
@@ -192,6 +200,16 @@ class VoiceSession:
                 and self.front.speech_seconds() >= BARGE_IN_SPEECH
             ):
                 self.barge.set()
+
+    def _voice_without_words(self) -> bool:
+        """The VAD heard the customer's voice while we waited, though no words were recognised. The first
+        half second is left out: the tail of the bot's own voice on the line."""
+        f = self.front
+        start = f.speech_started_at
+        if start < self.wait_started + 0.5:
+            return False
+        end = time.monotonic() if f.speaking else f.speech_ended_at
+        return end - start >= UNHEARD_SPEECH
 
     def _is_echo(self, heard: str) -> bool:
         return self.echo_guard and (echo_of(heard, self.speaking_text) or echo_of(heard, self.previous_text))
@@ -279,6 +297,7 @@ class VoiceSession:
 
     async def _next_turn(self) -> str | None:
         """The customer's next turn, None on silence; returns early (None) when they hang up."""
+        self.wait_started = time.monotonic()
         turn = asyncio.ensure_future(self.collector.next_turn(self.engine.state.awaiting, SILENCE_TIMEOUT))
         gone = asyncio.ensure_future(self.gone.wait())
         try:
@@ -374,10 +393,19 @@ class VoiceSession:
             if self.gone.is_set():
                 break
             if turn is None:
-                await self._event("customer_silence")
                 waited_from = time.monotonic()
+                if self._voice_without_words() and self.unheard < MAX_UNHEARD:
+                    # Someone spoke, too softly for words: ask again; never a step towards hanging up.
+                    self.unheard += 1
+                    await self._event("customer_unheard")
+                    unheard = getattr(engine, "handle_unheard", None)
+                    directive = unheard() if unheard is not None else engine.handle_silence()
+                    continue
+                self.unheard = 0
+                await self._event("customer_silence")
                 directive = engine.handle_silence()
                 continue
+            self.unheard = 0
             stopped = self.collector.last_commit_at or time.monotonic()
             if self.console:
                 print(f"\033[32m👤 ลูกค้า:\033[0m {turn}")

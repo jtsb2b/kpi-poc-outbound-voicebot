@@ -201,6 +201,8 @@ class PhoneCall:
         self._end: CallEnd | None = None
         if hasattr(engine, "on_recording_declined"):
             engine.on_recording_declined = self._discard_recording
+        if hasattr(engine, "on_recording_granted"):
+            engine.on_recording_granted = self._resume_recording
         self.sink = sink
         self.console = console
         self.is_canceled = is_canceled
@@ -254,7 +256,9 @@ class PhoneCall:
         assert settings.livekit_url
         # As in the inbound voicebot: one enhancer on the caller's audio (`_pump`) and nothing on top.
         # Echo cancellation, suppression and gain control here clipped and blurred speech.
-        front = VoiceFrontEnd(echo_cancellation=False, noise_suppression=False, gain_control=False)
+        front = VoiceFrontEnd(
+            echo_cancellation=False, noise_suppression=False, gain_control=settings.phone_gain_control
+        )
         player = VoicePlayer(make_out=RoomOut, report=self._note)
         asr = speech_stream(settings)
         try:
@@ -416,12 +420,22 @@ class PhoneCall:
             await stream.aclose()
 
     async def _discard_recording(self) -> None:
-        """The customer declined the recording: keep no audio from here on or before; the call goes on."""
+        """The customer declined the recording: nothing more is recorded, and at hang-up no audio is kept,
+        from before or after; the call goes on. Until then a misheard "no" can be taken back (KPI, 4 Nov:
+        "ยอม" was heard as "ไม่ยอม")."""
         if self._end is not None:
             self._end.recording_declined = True
         if self.recorder is not None:
-            self.recorder.discard()
+            self.recorder.pause()
         self._note("ลูกค้าไม่ยินยอมให้บันทึกเสียง: ไม่เก็บไฟล์เสียง (ยังบันทึกข้อความ)")
+
+    async def _resume_recording(self) -> None:
+        """The customer took back a "no" heard wrong: the recording goes on (the gap stays silent)."""
+        if self._end is not None:
+            self._end.recording_declined = False
+        if self.recorder is not None:
+            self.recorder.resume()
+        self._note("ลูกค้ายินยอมให้บันทึกเสียง (แก้คำตอบ): บันทึกเสียงต่อ")
 
     def _start_recording(self, out: RoomOut) -> None:
         """Record from the answer on, in this worker (both sides are already here)."""
@@ -433,6 +447,8 @@ class PhoneCall:
     async def _save_recording(self) -> None:
         """After hang-up: mix, encode and upload. A failure is marked on the call, never silent."""
         recorder, end = self.recorder, self._end
+        if recorder is not None and (recorder.paused or (end is not None and end.recording_declined)):
+            recorder.discard()  # declined and never taken back: no audio leaves the worker
         if recorder is None or end is None or recorder.discarded or not self.recording_key:
             return
         try:

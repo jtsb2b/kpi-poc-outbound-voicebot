@@ -1,9 +1,12 @@
 """Call request validation: phone, campaign record, mode and calling-hour gates."""
 
 from datetime import datetime
+from functools import cache
+from importlib import resources
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
+import yaml
 from pydantic import BaseModel, Field, field_validator
 
 from kpi_voicebot.campaigns import get_profile, load_campaign, validate_case
@@ -53,9 +56,24 @@ class RequestRejected(Exception):
         self.message = message
 
 
+@cache
+def holidays() -> dict[str, str]:
+    """ISO date -> name: the weekday holidays the bot never calls on (campaigns/data/holidays.yaml)."""
+    raw = resources.files("kpi_voicebot.campaigns").joinpath("data", "holidays.yaml").read_text(encoding="utf-8")
+    return {str(day): str(name) for day, name in (yaml.safe_load(raw) or {}).items()}
+
+
+def holiday_on(settings: Settings, now: datetime | None = None) -> str | None:
+    """The holiday's name when today (Thai time) is one and holidays are skipped."""
+    local = (now or datetime.now(ZoneInfo(settings.timezone))).astimezone(ZoneInfo(settings.timezone))
+    return holidays().get(local.date().isoformat()) if settings.skip_holidays else None
+
+
 def within_calling_hours(settings: Settings, now: datetime | None = None) -> bool:
     local = (now or datetime.now(ZoneInfo(settings.timezone))).astimezone(ZoneInfo(settings.timezone))
     clock = local.strftime("%H:%M")
+    if holiday_on(settings, local):
+        return False
     return local.weekday() in settings.calling_days and settings.calling_start <= clock < settings.calling_end
 
 
@@ -105,7 +123,10 @@ async def build_call_document(request: CallRequest, settings: Settings, store: S
         if not settings.live_calls_enabled:
             raise RequestRejected(409, "การโทรจริงยังไม่เปิดใช้งาน (ใช้โหมดจำลองได้)")
         if not within_calling_hours(settings):
-            raise RequestRejected(409, f"อยู่นอกเวลาโทร ({settings.calling_window})")
+            off = holiday_on(settings)
+            raise RequestRejected(
+                409, f"วันนี้เป็นวันหยุด ({off}) ไม่โทรออก" if off else f"อยู่นอกเวลาโทร ({settings.calling_window})"
+            )
         if destination.e164 and await store.asked_not_to_call(destination.e164):
             # OIC guideline: a customer's refusal is kept and respected for at least 6 months.
             raise RequestRejected(409, "ลูกค้าเบอร์นี้ขอไม่ให้ติดต่อกลับ (ภายใน 6 เดือน)")
