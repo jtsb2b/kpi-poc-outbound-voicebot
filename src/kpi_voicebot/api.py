@@ -4,8 +4,9 @@ import hmac
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from typing import Annotated, Any
+from zoneinfo import ZoneInfo
 
 import uvicorn
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -17,6 +18,7 @@ from pymongo.errors import PyMongoError
 
 from kpi_voicebot.campaigns import load_campaign, load_profiles
 from kpi_voicebot.config import Settings, get_settings
+from kpi_voicebot.dashboard import summarize
 from kpi_voicebot.excel_io import ImportError_, export_calls, parse_workbook, template_workbook
 from kpi_voicebot.models import ACTIVE_LIFECYCLE, CampaignId, Lifecycle
 from kpi_voicebot.phone import InvalidPhone, parse_destination
@@ -247,6 +249,24 @@ def create_app(settings: Settings | None = None, store: Store | None = None) -> 
         if not await store.delete_call(call_id):
             raise HTTPException(409, "ลบได้เฉพาะสายที่จบแล้ว")
         return Response(status_code=204)
+
+    @app.get("/api/v1/dashboard", tags=["dashboard"], dependencies=auth)
+    async def dashboard(
+        store: StoreDep,
+        days: Annotated[int | None, Query(ge=1, le=366, description="the last N Thai days; omit for all calls")] = None,
+        campaign: CampaignId | None = None,
+        include_simulations: bool = False,
+    ) -> dict[str, Any]:
+        tz = ZoneInfo(settings.timezone)
+        today = datetime.now(tz).date()
+        since = datetime.combine(today - timedelta(days - 1), time(), tz) if days else None
+        docs = await store.ended_calls(
+            since=since, campaign=campaign.value if campaign else None, live_only=not include_simulations
+        )
+        start = (
+            since.date() if since else min((as_utc(d["created_at"]).astimezone(tz).date() for d in docs), default=today)
+        )
+        return _json(summarize(docs, start=start, end=today, timezone=settings.timezone))  # type: ignore[no-any-return]
 
     @app.post("/api/v1/imports", tags=["excel"], dependencies=auth)
     async def upload_import(

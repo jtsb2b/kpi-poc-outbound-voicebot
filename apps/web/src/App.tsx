@@ -3,13 +3,14 @@ import { Api, loadToken, saveToken, type Call, type Campaign, type SystemStatus 
 import { CallSetup, type Draft } from "./components/CallSetup";
 import { CallSheet } from "./components/CallSheet";
 import { CallView } from "./components/CallView";
+import { Dashboard } from "./components/Dashboard";
 import { History } from "./components/History";
 import { Login } from "./components/Login";
-import { ClockIcon, LogoutIcon, PhoneIcon } from "./icons";
+import { ChartIcon, ClockIcon, LogoutIcon, PhoneIcon } from "./icons";
 import { ThemeToggle } from "./ui/ThemeToggle";
 import { transition } from "./ui/theme";
 
-type Tab = "call" | "history";
+type Tab = "call" | "history" | "dashboard";
 
 export function App() {
   const [token, setToken] = useState<string | null>(loadToken);
@@ -114,6 +115,10 @@ function Console({ api, onLogout }: { api: Api; onLogout: () => void }) {
               <ClockIcon size={16} />
               ประวัติการโทร
             </button>
+            <button className="tab" role="tab" aria-selected={tab === "dashboard"} onClick={() => go("dashboard")}>
+              <ChartIcon size={16} />
+              ภาพรวม
+            </button>
           </nav>
           <div className="topbar-actions">
             {status && !status.telephony_ready && (
@@ -175,6 +180,12 @@ function Console({ api, onLogout }: { api: Api; onLogout: () => void }) {
       {tab === "history" && (
         <main className="page">
           <History api={api} refreshKey={refreshKey} onOpen={setDetailId} onGoCall={() => go("call")} />
+        </main>
+      )}
+
+      {tab === "dashboard" && (
+        <main className="page">
+          <Dashboard api={api} refreshKey={refreshKey} onOpen={setDetailId} />
         </main>
       )}
 

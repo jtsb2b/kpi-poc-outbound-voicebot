@@ -281,3 +281,35 @@ export const ENGINE_LABEL: Record<EngineId, string> = {
   agni: "Agni",
   gemini_live: "Gemini Live",
 };
+
+/** "3:35" for a call's length. */
+export function minutesSeconds(seconds: number | null | undefined): string {
+  if (seconds == null) return "—";
+  const s = Math.round(seconds);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+/** "6 ชม. 57 นาที" for time added up over many calls. */
+export function hoursMinutes(seconds: number): string {
+  const minutes = Math.round(seconds / 60);
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (!h) return `${m} นาที`;
+  return m ? `${h.toLocaleString("th-TH")} ชม. ${m} นาที` : `${h.toLocaleString("th-TH")} ชม.`;
+}
+
+export function percent(value: number | null | undefined): string {
+  return value == null ? "—" : `${value.toLocaleString("th-TH", { maximumFractionDigits: 1 })}%`;
+}
+
+/** Why a call needs a call back: the follow-up task, or how the call ended. */
+export function reasonLabel(type: string): string {
+  if (type === "not_reached") return "ติดต่อไม่ได้";
+  return TASK_LABEL[type] ?? OUTCOME_LABEL[type] ?? type;
+}
+
+export function repairTone(status: string): Tone {
+  if (status === "repaired" || status === "booked" || status === "date_given") return "good";
+  if (status === "not_at_garage" || status === "customer_unreachable") return "bad";
+  return "warn";
+}

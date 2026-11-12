@@ -126,6 +126,22 @@ class Store:
         docs: list[dict[str, Any]] = await cursor.to_list(length=limit)
         return docs
 
+    async def ended_calls(
+        self, *, since: datetime | None, campaign: str | None = None, live_only: bool = True
+    ) -> list[dict[str, Any]]:
+        """Every ended call placed since `since` (all of them when None), for the dashboard: the call
+        record without its script and campaign snapshot."""
+        query: dict[str, Any] = {"lifecycle": Lifecycle.ENDED.value}
+        if since is not None:
+            query["created_at"] = {"$gte": since}
+        if campaign:
+            query["campaign"] = campaign
+        if live_only:
+            query["mode"] = "live"
+        cursor = self.calls.find(query, {"script": 0, "campaign_snapshot": 0})
+        docs: list[dict[str, Any]] = await cursor.to_list(length=None)
+        return docs
+
     async def claim_next(self, worker_id: str, lease_seconds: int) -> dict[str, Any] | None:
         queued = await self.calls.find_one({"lifecycle": Lifecycle.QUEUED.value}, sort=[("created_at", ASCENDING)])
         if queued is None:

@@ -152,3 +152,10 @@ export const MoonIcon = (p: P) => (
     <path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a6.8 6.8 0 0 0 10.7 10.7z" />
   </Icon>
 );
+
+export const ChartIcon = (p: P) => (
+  <Icon {...p}>
+    <path d="M3 3v18h18" />
+    <path d="M7 15v2M11 11v6M15 7v10M19 12v5" />
+  </Icon>
+);

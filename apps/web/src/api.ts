@@ -165,6 +165,87 @@ export interface SystemStatus {
   active_call_id: string | null;
 }
 
+/** The dashboard (KPI demo feedback, 4 Nov 2026): every rate excludes calls an operator canceled. */
+export interface DashboardTotals {
+  calls: number;
+  reached: number;
+  not_reached: number;
+  completed: number;
+  contact_rate: number | null;
+  success_rate: number | null;
+  talk_seconds: number;
+  average_talk_seconds: number | null;
+}
+
+export interface DashboardQuestion {
+  question: string;
+  label: string;
+  scale_min: number;
+  scale_max: number;
+  responses: number;
+  average: number;
+  distribution: { value: number; count: number }[];
+}
+
+export interface DashboardFollowUp {
+  call_id: string;
+  campaign: CampaignId;
+  target_name: string;
+  phone: string | null;
+  at: string;
+  outcome: string | null;
+  reasons: { type: string; text: string }[];
+  callback_time_text?: string | null;
+  callback_date?: string | null;
+}
+
+export interface DashboardVehicle {
+  plate: string;
+  car?: string;
+  customer_name?: string;
+  claim_no?: string;
+  garage_name?: string;
+  status: string;
+  completion_text?: string | null;
+  completion_date?: string | null;
+  appointment_text?: string | null;
+  appointment_date?: string | null;
+  pickup_text?: string | null;
+  pickup_date?: string | null;
+  statement?: string | null;
+  /** Still "in repair" after the day the garage said it would be done: call the garage again. */
+  overdue: boolean;
+  campaign: CampaignId;
+  call_id: string;
+  at: string;
+}
+
+export interface Dashboard {
+  start: string;
+  end: string;
+  timezone: string;
+  totals: DashboardTotals & { canceled: number };
+  campaigns: (DashboardTotals & { campaign: CampaignId; staff_minutes: [number, number] })[];
+  daily: { date: string; completed: number; reached_not_completed: number; not_reached: number }[];
+  outcomes: { outcome: string; count: number }[];
+  satisfaction: {
+    responses: number;
+    surveys: number;
+    average: number | null;
+    csat: number | null;
+    questions: DashboardQuestion[];
+    trend: {
+      date: string;
+      responses: number;
+      day_average: number | null;
+      cumulative_average: number | null;
+      cumulative_csat: number | null;
+    }[];
+  };
+  follow_ups: DashboardFollowUp[];
+  vehicles: DashboardVehicle[];
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -234,6 +315,13 @@ export class Api {
     if (campaign) q.set("campaign", campaign);
     if (outcome) q.set("outcome", outcome);
     return this.json<Call[]>(`/api/v1/calls?${q}`);
+  };
+  dashboard = (days: number | null, campaign?: string, includeSimulations = false) => {
+    const q = new URLSearchParams();
+    if (days) q.set("days", String(days));
+    if (campaign) q.set("campaign", campaign);
+    if (includeSimulations) q.set("include_simulations", "true");
+    return this.json<Dashboard>(`/api/v1/dashboard?${q}`);
   };
   call = (id: string) => this.json<Call>(`/api/v1/calls/${id}`);
   cancel = (id: string) => this.json<Call>(`/api/v1/calls/${id}/cancel`, { method: "POST" });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IdempotencyKeys } from "./api";
-import { caseSummary, elapsed, outcomeTone, stepIndex } from "./format";
+import { caseSummary, elapsed, hoursMinutes, minutesSeconds, outcomeTone, reasonLabel, stepIndex } from "./format";
 
 describe("format helpers", () => {
   it("maps terminal and transitional lifecycles onto the stepper", () => {
@@ -14,6 +14,16 @@ describe("format helpers", () => {
     expect(outcomeTone("callback_requested")).toBe("warn");
     expect(outcomeTone("wrong_person")).toBe("bad");
     expect(outcomeTone(null)).toBe("neutral");
+  });
+
+  it("formats dashboard durations and call-back reasons", () => {
+    expect(minutesSeconds(215)).toBe("3:35");
+    expect(minutesSeconds(null)).toBe("—");
+    expect(hoursMinutes(24994)).toBe("6 ชม. 57 นาที");
+    expect(hoursMinutes(600)).toBe("10 นาที");
+    expect(reasonLabel("not_reached")).toBe("ติดต่อไม่ได้");
+    expect(reasonLabel("callback")).toBe("ติดต่อกลับ");
+    expect(reasonLabel("policy_partial")).toBe("ทวนข้อมูลไม่ครบ");
   });
 
   it("formats elapsed time", () => {
