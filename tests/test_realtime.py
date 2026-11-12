@@ -187,3 +187,16 @@ def test_agni_calls_a_garage_tang_oo_and_never_khun() -> None:
     examples = text[text.index("ตัวอย่างประโยค") : text.index("การปิดสาย")]
     assert "ขอบพระคุณทางอู่มากค่ะ" in examples and "สะดวก" not in examples
     assert "ขอบพระมาก" not in text  # a crude "คุณ" removal once cut ขอบพระคุณ in half
+
+
+def test_the_engines_read_days_off_a_calendar() -> None:
+    for engine in ("agni", "gemini_live"):
+        text = instructions(survey_agent(), engine)
+        assert "ปฏิทิน (เวลาประเทศไทย" in text and "สัปดาห์หน้า: วันจันทร์ที่" in text
+        assert "ห้ามนับวันเอง" in text
+
+
+def test_agni_never_offers_a_score_and_leaves_call_backs_to_staff() -> None:
+    text = instructions(survey_agent(), "agni")
+    assert "ห้ามเสนอคะแนนให้ลูกค้า" in text  # "จะให้ห้าคะแนนเลยไหม" to a silent line (11 Nov)
+    assert "ดิฉันจะแจ้งเจ้าหน้าที่ให้ติดต่อกลับ" in text  # not "ดิฉันติดต่อกลับไปอีกครั้ง"

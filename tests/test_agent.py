@@ -981,3 +981,24 @@ async def test_the_score_questions_are_asked_in_order() -> None:
     )
     text = await say(a, "ให้ 4 ครับ")  # 4 Nov suite: q1, then straight to q5
     assert len(model.seen) == 2 and "ศูนย์รับแจ้งอุบัติเหตุ" in text and "0 ถึง 10" not in text
+
+
+async def test_the_pipeline_knows_today_and_is_given_the_day_a_customer_names(monkeypatch: Any) -> None:
+    # KPI, 11 Nov: the bot must know the real date and work days out properly.
+    import datetime as dt
+
+    from kpi_voicebot import agent as agent_module
+    from kpi_voicebot.when import BANGKOK
+
+    now = dt.datetime(2026, 11, 11, 14, 45, tzinfo=BANGKOK)
+    monkeypatch.setattr(agent_module, "now_th", lambda: now)
+    monkeypatch.setattr(agent_module, "today_th", lambda: now.date())
+    answer = "SAY: ได้ค่ะ ดิฉันจะแจ้งเจ้าหน้าที่ให้ติดต่อกลับวันพฤหัสบดีที่ 19 พฤศจิกายนนะคะ\nEND: none"
+    a, model = agent("pa-email", [answer])
+    a.start()
+    ready(a)
+    text = await say(a, "ตอนนี้ไม่สะดวก โทรมาพฤหัสหน้าได้ไหมครับ")
+    assert "19 พฤศจิกายน" in text and len(model.seen) == 1  # the worked-out date is not an invented number
+    seen = model.seen[0][1]["content"]
+    assert "วันนี้: วันพุธที่ 11 พฤศจิกายน 2569" in seen
+    assert '"พฤหัสหน้า" คือ วันพฤหัสบดีที่ 19 พฤศจิกายน' in seen

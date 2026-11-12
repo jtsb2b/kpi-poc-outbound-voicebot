@@ -58,6 +58,9 @@ export interface VehicleResult {
   completion_text?: string | null;
   appointment_text?: string | null;
   pickup_text?: string | null;
+  completion_date?: string | null;
+  appointment_date?: string | null;
+  pickup_date?: string | null;
   statement?: string | null;
 }
 
@@ -65,7 +68,7 @@ export interface CallResult {
   identity_result: string;
   notice_delivered: boolean;
   recording_consent?: boolean | null;
-  callback: { requested: boolean; preferred_time_text?: string | null };
+  callback: { requested: boolean; preferred_time_text?: string | null; preferred_date?: string | null };
   policy_fields: PolicyField[];
   free_look_delivery?: string | null;
   survey_answers: SurveyAnswer[];

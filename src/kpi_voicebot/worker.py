@@ -25,6 +25,7 @@ from kpi_voicebot.recording import object_key
 from kpi_voicebot.responder import Responder
 from kpi_voicebot.simulator import Canceled, build_engine, run_script
 from kpi_voicebot.store import Store, utcnow
+from kpi_voicebot.when import fill_dates, today_th
 
 log = logging.getLogger("kpi.worker")
 
@@ -204,6 +205,7 @@ class Worker:
         store = self.store
         await store.set_lifecycle(call_id, Lifecycle.ENDING)
         outcome = engine.outcome or Outcome.TECHNICAL_FAILURE
+        fill_dates(engine.result, today_th())
         result = engine.result.model_dump(mode="json")
         if outcome is Outcome.NOTICE_OBJECTION:
             result = scrub_customer_text(result)

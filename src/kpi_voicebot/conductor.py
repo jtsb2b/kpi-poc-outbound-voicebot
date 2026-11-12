@@ -36,6 +36,7 @@ from kpi_voicebot.repair_engine import UNSURE, WHEN
 from kpi_voicebot.survey_engine import SurveyEngine
 from kpi_voicebot.thai_parse import parse_score, read_signals
 from kpi_voicebot.tts_text import speakable
+from kpi_voicebot.when import hint, today_th
 
 # What `record` may be told: hints only, the step decides.
 STATUSES = [
@@ -135,6 +136,9 @@ class Conductor:
         out = self._record(item.strip(), status.strip(), score, words.strip(), heard.strip())
         self.recorded.append({"item": item, "status": status, "score": score, "heard": heard[:80], "ok": out["ok"]})
         out["next"] = self.next_instruction()
+        # "พฤหัสหน้า": the day it is, worked out by code, so the engine reads back a date and never counts.
+        if out["ok"] and (days := hint(heard or words, today_th())):
+            out["say"] += f" | {days} ทวนวันและวันที่นี้ให้อีกฝ่ายฟัง"
         return out
 
     def interpret(self, text: str, reply: str = "") -> dict[str, Any] | None:

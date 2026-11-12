@@ -237,12 +237,18 @@ class VehicleResult(BaseModel):
     completion_text: str | None = None  # when repairs should be finished, as the garage said it
     appointment_text: str | None = None  # when the car goes in for repair
     pickup_text: str | None = None  # when the car should be ready to collect
+    # The day each of those works out to, from the date of the call ("พฤหัสหน้า" -> "วันพฤหัสบดีที่ 19
+    # พฤศจิกายน 2569"): worked out by code (`when.fill_dates`), never by the model.
+    completion_date: str | None = None
+    appointment_date: str | None = None
+    pickup_date: str | None = None
     statement: str | None = None  # what the other side said, word for word
 
 
 class CallbackRequest(BaseModel):
     requested: bool = False
     preferred_time_text: str | None = None
+    preferred_date: str | None = None  # the worked-out day, see VehicleResult.completion_date
 
 
 class ConversationResult(BaseModel):

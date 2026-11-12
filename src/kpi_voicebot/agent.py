@@ -57,6 +57,7 @@ from kpi_voicebot.survey_engine import SurveyEngine
 from kpi_voicebot.thai_parse import day_months, read_signals
 from kpi_voicebot.thai_text import THAI_MONTHS
 from kpi_voicebot.tts_text import AUDIO_TAGS, without_tags
+from kpi_voicebot.when import hint, now_th, today_line, today_th
 
 log = logging.getLogger("kpi.agent")
 
@@ -174,6 +175,8 @@ SYSTEM_PROMPT = """คุณคือ "น้องเคพีไอ" AI ผู
 - ยินยอมให้บันทึกเสียงต้องเป็นคำตอบรับชัดๆ เท่านั้น (ยินยอม ได้ครับ ตกลง) ถ้าไม่แน่ใจหรือลูกค้าดูไม่เต็มใจ ให้ถือว่าไม่ยินยอม
 - คำตอบที่ฟังไม่ได้ความ (เช่น "ส่งครับ ส่ง" "ชื่อว่า ตม. ครับ") ไม่ใช่การแจ้งว่าข้อมูลผิด: ขอให้ลูกค้าพูดอีกครั้งอย่างสุภาพ
 - ถ้ามี "คำนวณให้แล้ว" ในข้อมูลของตานี้ ให้ตอบด้วยวันที่นั้นตรงๆ
+- ลูกค้าบอกวันแบบ "พรุ่งนี้" "พฤหัสหน้า" "อีกสองอาทิตย์": ทวนกลับเป็นวันและวันที่ตามที่คำนวณให้แล้ว
+  เช่น "วันพฤหัสบดีที่ 19 พฤศจิกายนนะคะ" ห้ามนับวันเอง ถ้ามีสองความหมาย ให้ถามลูกค้าว่าหมายถึงวันไหน
 - ถ้าคำของลูกค้าฟังไม่ได้ความจริงๆ (ข้อความขาดหรือไม่เกี่ยวเลย) ให้โทษสัญญาณ ไม่ใช่ลูกค้า:
   "ขอโทษค่ะ เมื่อสักครู่เสียงไม่ค่อยชัด รบกวนพูดอีกครั้งได้ไหมคะ"
   ถ้าเข้าใจที่ลูกค้าพูด ห้ามบอกว่าเสียงไม่ชัด ห้ามพูด "อะไรนะคะ" "ไม่เข้าใจค่ะ"
@@ -672,7 +675,8 @@ class CallAgent:
         self.state.turn += 1
         self.history.append(("customer", customer))
         signals = read_signals(customer)
-        self.date_hint = self._free_look_dates(customer)
+        # Days the customer names ("พฤหัสหน้า") worked out by code: KPI, 11 Nov, the bot must get days right.
+        self.date_hint = "\n".join(h for h in (self._free_look_dates(customer), hint(customer, today_th())) if h)
         self.rule_scored = None
         self.car_acks = []
         self.rule_cars = set()
@@ -1103,6 +1107,7 @@ class CallAgent:
         user = (
             "ข้อมูลของสายนี้ (ตอบคำถามได้ ห้ามแต่งเพิ่ม):\n"
             + "\n".join(self.base.fact_sheet())
+            + f"\n- {today_line(now_th())}"
             + "\n\nรายการที่ต้องทำในสายนี้:\n"
             + self.checklist_text()
             + f"\n\nบทสนทนาที่ผ่านมา:\n{talk or '-'}\n\nลูกค้าเพิ่งพูดว่า: {customer}"
@@ -1127,7 +1132,7 @@ class CallAgent:
         dates = day_months(customer)
         if not dates:
             return ""
-        today = dt.date.today()
+        today = today_th()
 
         def on(day: int, month: int) -> dt.date | None:
             for year in (today.year, today.year + 1):
@@ -1320,7 +1325,7 @@ class CallAgent:
         reply = " ".join(lines)
         flat = _flat(reply)
         kb = knowledge(self.campaign.id)
-        facts = " ".join(self.base.fact_sheet())
+        facts = " ".join([*self.base.fact_sheet(), today_line(now_th())])
         if _MARKUP.search(reply):
             return "ห้ามใช้ Markdown ลิงก์ หรือ https"
         # "อู่คู่สัญญา" (a partner garage, KPI's own wording) is not a promise.

@@ -17,13 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import datetime as dt
 import logging
 import re
 import time
 from collections.abc import Awaitable
 from typing import Any, Literal
-from zoneinfo import ZoneInfo
 
 import httpx
 import numpy as np
@@ -39,10 +37,10 @@ from kpi_voicebot.models import Directive, Segment
 from kpi_voicebot.simulator import Sink
 from kpi_voicebot.survey_engine import SurveyEngine
 from kpi_voicebot.telephony import CallEnd, PhoneCall, RoomOut, _token
-from kpi_voicebot.thai_parse import parse_score
-from kpi_voicebot.thai_text import THAI_MONTHS
-from kpi_voicebot.tts_text import clock_words, speakable
+from kpi_voicebot.thai_parse import _HOLD, contains_any, parse_score
+from kpi_voicebot.tts_text import speakable
 from kpi_voicebot.voice_session import asr_context
+from kpi_voicebot.when import calendar_lines, now_th
 
 log = logging.getLogger("kpi.realtime")
 
@@ -69,7 +67,9 @@ _CALL_RULES = """การคุยครั้งนี้เป็นสาย
 - ทุกคำถามที่ถามลูกค้า (ยืนยันตัวตน สะดวกคุยไหม ยินยอมให้บันทึกเสียงไหม ข้อมูลถูกต้องไหม คะแนน) ต้องหยุดรอคำตอบก่อนพูดเรื่องถัดไป
 - ทำตาม "รายการที่ต้องทำในสายนี้" ทีละขั้นตามลำดับ ห้ามข้าม ห้ามถามข้อที่ได้คำตอบแล้วซ้ำ
 {notice_rule}{free_look}
-- วันที่หรือเวลาที่อีกฝ่ายบอก ให้ทวนตามคำที่เขาพูดทุกคำ ห้ามเปลี่ยนตัวเลข ถ้าฟังไม่ชัดให้ถามซ้ำ ห้ามเดา
+- วันที่หรือเวลาที่อีกฝ่ายบอก ให้ทวนตามคำที่เขาพูด ห้ามเปลี่ยนตัวเลข ถ้าฟังไม่ชัดให้ถามซ้ำ ห้ามเดา
+  อีกฝ่ายบอกวันแบบ "พรุ่งนี้" "พฤหัสหน้า" "อีกสองอาทิตย์": ทวนเป็นวันและวันที่ด้วย เช่น "วันพฤหัสบดีที่ 19 พฤศจิกายนนะคะ"
+  อ่านวันจาก "ปฏิทิน" ในข้อมูลของสายนี้เท่านั้น ห้ามนับวันเอง "…หน้า" ที่ตรงกับวันในสัปดาห์นี้ได้ด้วย ให้ถามว่าหมายถึงวันไหน
 {party_rules}- ข้อมูลกรมธรรม์ ตัวเลข วันที่ จำนวนเงิน พูดให้ตรงกับข้อมูลของสายนี้ทุกตัว ห้ามแต่งเพิ่ม
 - ตอบคำถามได้เฉพาะสิ่งที่เขียนไว้ใน "ข้อมูลของสายนี้" หรือ "ความรู้ที่อนุมัติ" เท่านั้น ห้ามเติมรายละเอียดที่ไม่ได้เขียนไว้
   (เช่น จำนวนครั้ง วงเงินรวมต่อปี เงื่อนไข ข้อยกเว้น ระยะเวลา) ถ้าไม่มีเขียนไว้ ให้บอกตรงๆ ว่ายังไม่มีข้อมูลยืนยัน
@@ -136,10 +136,14 @@ _AGNI_STYLE = """ถ้อยคำ (สำคัญที่สุด)
 - ตอบรับคำตอบด้วย "ค่ะ" หรือ "รับทราบค่ะ" หรือ "ได้ค่ะ" ห้ามขึ้นต้นด้วย "ขอบคุณ" ทุกตา
 - ตาละ 1-2 ประโยค ห้ามอธิบายช่วงคะแนนหรือความหมายของคะแนนซ้ำทุกข้อ บอกครั้งเดียวตอนถามข้อแรก และเมื่อช่วงเปลี่ยน
 - ห้ามพูดว่า "ดิฉันบันทึกเสียงเรียบร้อยแล้ว" หรืออธิบายการทำงานของระบบ
+- ลูกค้าเงียบหรือยังไม่ได้ตอบ: ห้ามสมมติคำตอบแล้วไปต่อ ห้ามเสนอคำตอบให้ลูกค้าเลือก ให้ถามเดิมอีกครั้งหรือถามว่ายังอยู่ในสายไหม
+  (11 พ.ย. ลูกค้าเงียบ แล้วพูดว่า "ได้ค่ะ ห้าคะแนนนะคะ" ไปเองสามข้อ)
 
 ตัวอย่างประโยค (ปรับคำได้เล็กน้อย แต่คงระดับความสุภาพนี้)
 - ถามความสะดวก: "ไม่ทราบว่าตอนนี้สะดวกคุยสักครู่ไหมคะ"
 - ลูกค้าไม่สะดวก: "ไม่เป็นไรค่ะ ต้องขออภัยที่รบกวนนะคะ ไม่ทราบว่าสะดวกให้ติดต่อกลับช่วงเวลาไหนดีคะ"
+- ได้เวลาติดต่อกลับแล้ว (บอกวันและวันที่จากปฏิทิน): "รับทราบค่ะ ดิฉันจะแจ้งเจ้าหน้าที่ให้ติดต่อกลับวันพฤหัสบดีที่
+  12 พฤศจิกายน ช่วงเช้านะคะ ขอบพระคุณค่ะ สวัสดีค่ะ" ห้ามพูดว่า "ดิฉันจะโทรกลับไปเอง" (เจ้าหน้าที่เป็นผู้โทร)
 - ขอให้พูดซ้ำ: "ขอโทษค่ะ เมื่อสักครู่เสียงไม่ค่อยชัด รบกวนพูดอีกครั้งได้ไหมคะ"
 - ลูกค้าเงียบ: "ขอโทษนะคะ ไม่ทราบว่า{you}ยังอยู่ในสายไหมคะ"
 {agni_examples}- ปิดสาย: "ขอบพระคุณ{you}มากค่ะที่สละเวลา ขอให้มีวันที่ดีนะคะ สวัสดีค่ะ" แล้วเรียก end_call"""
@@ -148,6 +152,7 @@ _AGNI_SURVEY = """- ถามคะแนนข้อแรก: "ขออนุ
 - ถามข้อต่อไป: "แล้วในเรื่อง… ไม่ทราบว่าให้กี่คะแนนคะ"
 - รับคะแนน: "ได้ค่ะ สามคะแนนนะคะ" แล้วถามข้อต่อไปในตาเดียวกัน
   ห้ามต่อท้ายด้วย "ขอบคุณที่แจ้งนะคะ ดิฉันขออนุญาตบันทึกเรื่องนี้…" (พูดทุกข้อจนลูกค้ารำคาญ 11 พ.ย.)
+- ห้ามเสนอคะแนนให้ลูกค้า (เช่น "จะให้ห้าคะแนนเลยไหมคะ") ห้ามพูด "ได้ค่ะ … คะแนน" ถ้าลูกค้าไม่ได้เพิ่งพูดตัวเลขนั้น
 - ก่อนรับคะแนน ตรวจว่าลูกค้าพูดตัวเลขจริงและอยู่ในช่วงของข้อนั้น:
   ลูกค้าไม่ได้พูดตัวเลข (เช่น "ก็ได้" "แล้วแต่") ห้ามพูดตัวเลขเอง ให้ถามใหม่
   ตัวเลขเกินช่วง (เช่น แปด ในข้อที่ให้ได้หนึ่งถึงห้า) ห้ามพูดว่า "ได้ค่ะ แปดคะแนน" ให้บอกช่วงแล้วถามใหม่
@@ -224,13 +229,14 @@ def _reading(value: str) -> str:
 
 
 def _spoken_facts(agent: CallAgent) -> list[str]:
-    now = dt.datetime.now(ZoneInfo("Asia/Bangkok"))
+    now = now_th()
     lines = []
     for line in agent.base.fact_sheet():
         label, sep, value = line.partition(": ")
         lines.append(f"{label}{sep}{_reading(value)}" if sep else line)
-    clock = clock_words(now.hour, now.minute)
-    lines.append(f"- วันนี้: วันที่ {now.day} {THAI_MONTHS[now.month - 1]} {now.year + 543} เวลาตอนเริ่มสาย {clock}")
+    # KPI, 11 Nov: the bot must know the real date and get days right; the engine reads days off this.
+    lines.append("- ปฏิทิน (เวลาประเทศไทย ตอนเริ่มสาย):")
+    lines += [f"  {line}" for line in calendar_lines(now)]
     return lines
 
 
@@ -909,6 +915,8 @@ class GeminiLive(LabEngine):
 
 
 FAREWELL = re.compile(r"สวัสดี(ค่ะ|คะ|นะคะ|ครับ)\s*$|ขอให้มีวันที่ดี")
+NO_ANSWER_S = 25.0  # no words from the customer this long (Agni's reminder comes at 10 s): hang up
+HOLD_S = 90.0
 HANG_UP_AFTER_S = 2.5  # quiet after Agni's goodbye before this worker hangs up
 HANG_UP_ASKED = re.compile(r"วางสาย|วางได้|ไม่คุยแล้ว|พอแล้ว\s*(ครับ|ค่ะ)?\s*$")
 _GOODBYE_WORDS = re.compile(
@@ -984,6 +992,7 @@ class Agni(LabEngine):
         source = rtc.AudioSource(IN_RATE, 1)
         room = self.room
         self._spawn(self._watch_for_end(call))
+        self._spawn(self._watch_silence(call))
 
         def on_track(track_: rtc.Track, *_: object) -> None:
             if track_.kind == rtc.TrackKind.KIND_AUDIO:
@@ -1000,9 +1009,14 @@ class Agni(LabEngine):
                 if seg.final and seg.id not in self._captioned and seg.text.strip():
                     self._captioned.add(seg.id)
                     self._spawn(call.transcript.bot(seg.text))
-                    # Not the opening: a greeting caption may arrive split, as a bare "สวัสดีค่ะ".
-                    turns = sum(1 for who_, _ in call.transcript.history if who_ == "bot")
-                    if turns >= 3 and FAREWELL.search(seg.text.strip()):
+                    # Not the opening (its caption may arrive split, as a bare "สวัสดีค่ะ"): a goodbye comes
+                    # after the customer has spoken. Counting three bot lines kept a call open after an early
+                    # "ไม่สะดวก" goodbye on 11 Nov (the line being captioned is not in the history yet), and
+                    # Agni then asked the customer who had just been told goodbye if they were still there.
+                    history = call.transcript.history
+                    spoke = any(who_ == "customer" for who_, _ in history) or call.utterances
+                    opened = any(who_ == "bot" for who_, _ in history)  # a "ฮัลโหล" may come before the greeting
+                    if spoke and opened and FAREWELL.search(seg.text.strip()):
                         if self._goodbye is not None:
                             self._goodbye.cancel()
                         self._goodbye = self._spawn(self._hang_up_after_goodbye(call))
@@ -1053,6 +1067,26 @@ class Agni(LabEngine):
                 while time.monotonic() - call.meter.bot_last < 1.5 and time.monotonic() - asked_at < 12:
                     await asyncio.sleep(0.2)
                 self._end(call, "ลูกค้าขอให้วางสาย: วางสาย", "customer_asked_to_end")
+                return
+
+    async def _watch_silence(self, call: RealtimePhoneCall) -> None:
+        """Agni ends a silent call itself with a fixed English line ("Since I have not heard from you after
+        multiple attempts, I am ending this call now…", 11 Nov) that Ravan has no setting for. Its own end on
+        silence is set far out (`endcallOnSilenceDuration`), and this worker hangs up first, once Agni's Thai
+        reminder has gone unanswered. Silence is counted on words Soniox heard, not loudness: line noise is
+        not an answer."""
+        heard = time.monotonic()
+        while not self.gone.is_set():
+            await asyncio.sleep(1.0)
+            if call.utterances:
+                heard = max(heard, call.utterances[-1][0])
+            if call.partial:
+                heard = time.monotonic()
+            now = time.monotonic()
+            # "แป๊บนึงนะ": the customer asked us to hold, and is given longer.
+            held = bool(call.utterances) and contains_any(call.utterances[-1][1], _HOLD)
+            if now - heard > (HOLD_S if held else NO_ANSWER_S) and now - call.meter.bot_last > 2.0:
+                self._end(call, f"ลูกค้าไม่ตอบ {NO_ANSWER_S:.0f} วินาที: วางสาย", "silence")
                 return
 
     def _end(self, call: RealtimePhoneCall, note: str, reason: str) -> None:

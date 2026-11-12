@@ -56,7 +56,10 @@ export function ResultView({ call, detailed = false }: { call: Call; detailed?: 
         {r.callback.requested && (
           <div className="kv-row">
             <span className="kv-label">ขอให้ติดต่อกลับ</span>
-            <span className="kv-value">{r.callback.preferred_time_text || "ไม่ได้ระบุเวลา"}</span>
+            <span className="kv-value">
+              {r.callback.preferred_time_text || "ไม่ได้ระบุเวลา"}
+              {r.callback.preferred_date && <small> → {r.callback.preferred_date}</small>}
+            </span>
           </div>
         )}
         {r.free_look_delivery && (
@@ -127,9 +130,11 @@ export function ResultView({ call, detailed = false }: { call: Call; detailed?: 
               <div className="kv-row" key={v.plate}>
                 <span className="kv-label">
                   <strong>{v.plate}</strong> {v.label}
-                  {v.completion_text && <small>คาดว่าซ่อมเสร็จ: {v.completion_text}</small>}
-                  {v.appointment_text && <small>วันนัด/วันที่สะดวกเข้าซ่อม: {v.appointment_text}</small>}
-                  {v.pickup_text && <small>วันรับรถ: {v.pickup_text}</small>}
+                  {v.completion_text && <small>คาดว่าซ่อมเสร็จ: {withDate(v.completion_text, v.completion_date)}</small>}
+                  {v.appointment_text && (
+                    <small>วันนัด/วันที่สะดวกเข้าซ่อม: {withDate(v.appointment_text, v.appointment_date)}</small>
+                  )}
+                  {v.pickup_text && <small>วันรับรถ: {withDate(v.pickup_text, v.pickup_date)}</small>}
                   {detailed && v.statement && <p className="quote">“{v.statement}”</p>}
                 </span>
                 <span className="kv-value">
@@ -165,4 +170,9 @@ export function ResultView({ call, detailed = false }: { call: Call; detailed?: 
       )}
     </div>
   );
+}
+
+/** The other side's words, then the day they work out to ("พฤหัสหน้า → วันพฤหัสบดีที่ 19 พฤศจิกายน 2569"). */
+function withDate(words: string, date?: string | null): string {
+  return date ? `${words} → ${date}` : words;
 }
